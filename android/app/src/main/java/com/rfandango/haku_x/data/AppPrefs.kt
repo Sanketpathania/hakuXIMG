@@ -154,6 +154,21 @@ class AppPrefs(context: Context) {
     get() = sp.getString(KEY_INSIGNIA_DNS, "") ?: ""
     set(value) = sp.edit { putString(KEY_INSIGNIA_DNS, value) }
 
+  /** Insignia's setup wizard: the user said the Setup Assistant registered this console. */
+  var insigniaRegistered: Boolean
+    get() = sp.getBoolean(KEY_INSIGNIA_REGISTERED, false)
+    set(value) = sp.edit { putBoolean(KEY_INSIGNIA_REGISTERED, value) }
+
+  /** Insignia's setup wizard: the Setup Assistant ISO the user chose (a document URI), "" none. */
+  var insigniaSetupUri: String
+    get() = sp.getString(KEY_INSIGNIA_SETUP_URI, "") ?: ""
+    set(value) = sp.edit { putString(KEY_INSIGNIA_SETUP_URI, value) }
+
+  /** Insignia's setup wizard started the Setup Assistant or the dashboard: the app opens it again after. */
+  var insigniaWizardResume: Boolean
+    get() = sp.getBoolean(KEY_INSIGNIA_RESUME, false)
+    set(value) = sp.edit { putBoolean(KEY_INSIGNIA_RESUME, value) }
+
   /** The console's language: auto (the phone's, where the Xbox has it) or one of XBOX_LANGUAGES. */
   var language: String
     get() = sp.getString(KEY_LANGUAGE, LANG_AUTO) ?: LANG_AUTO
@@ -238,6 +253,9 @@ class AppPrefs(context: Context) {
     private const val KEY_LAN_PEERS = "network_lan_peers"
     private const val KEY_KAI_ENGINE = "network_kai_engine"
     private const val KEY_INSIGNIA_DNS = "network_insignia_dns"
+    private const val KEY_INSIGNIA_REGISTERED = "insignia_registered"
+    private const val KEY_INSIGNIA_SETUP_URI = "insignia_setup_uri"
+    private const val KEY_INSIGNIA_RESUME = "insignia_wizard_resume"
     const val NET_OFF = "off"
     const val NET_LAN = "lan"
     const val NET_KAI = "kai"

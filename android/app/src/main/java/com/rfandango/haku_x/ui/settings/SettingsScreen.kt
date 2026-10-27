@@ -68,6 +68,8 @@ fun SettingsScreen(
   onGpuDriver: () -> Unit,
   /** The first-start screen again: the xemu-based release's data brought over. */
   onMigrate: () -> Unit,
+  /** Insignia's setup wizard (Xbox Live). */
+  onInsignia: () -> Unit,
 ) {
   val context = LocalContext.current
   val prefs = remember { AppPrefs(context) }
@@ -238,7 +240,7 @@ fun SettingsScreen(
         modifier = Modifier.clickable { clockDialog = true },
       )
 
-      NetworkSettings(prefs)
+      NetworkSettings(prefs, onInsignia)
 
       Section(stringResource(R.string.settings_section_console_video))
       Hint(stringResource(R.string.settings_console_video_desc))

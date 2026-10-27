@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.rfandango.haku_x.R
 import com.rfandango.haku_x.data.AppPrefs
 import com.rfandango.haku_x.ui.common.ChoiceDialog
@@ -28,7 +29,7 @@ import com.rfandango.haku_x.ui.common.Section
  * this network. Read at the next game start.
  */
 @Composable
-fun NetworkSettings(prefs: AppPrefs) {
+fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
   var mode by remember { mutableStateOf(prefs.networkMode) }
   var peers by remember { mutableStateOf(prefs.lanPeers) }
   var kai by remember { mutableStateOf(prefs.kaiEngine) }
@@ -37,9 +38,20 @@ fun NetworkSettings(prefs: AppPrefs) {
   var peersDialog by remember { mutableStateOf(false) }
   var kaiDialog by remember { mutableStateOf(false) }
   var dnsDialog by remember { mutableStateOf(false) }
+  // back from Insignia's setup, which may have chosen the connection
+  LifecycleResumeEffect(Unit) {
+    mode = prefs.networkMode
+    onPauseOrDispose {}
+  }
 
   Section(stringResource(R.string.settings_section_network))
   Hint(stringResource(R.string.settings_network_desc))
+  // Insignia's setup wizard: everything online play needs, step by step
+  ListItem(
+    headlineContent = { Text(stringResource(R.string.insignia_title)) },
+    supportingContent = { Text(stringResource(R.string.insignia_settings_desc)) },
+    modifier = Modifier.clickable(onClick = onInsignia),
+  )
   ListItem(
     headlineContent = { Text(stringResource(R.string.settings_network_mode)) },
     supportingContent = {

@@ -240,13 +240,15 @@ fun SettingsScreen(
         supportingContent = { Text(clockLabel(clockOffset) + ". " + stringResource(R.string.settings_clock_desc)) },
         modifier = Modifier.clickable { clockDialog = true },
       )
-      SwitchItem(
-        title = stringResource(R.string.settings_console_timing),
-        summary = stringResource(R.string.settings_console_timing_desc) + " " +
-          stringResource(R.string.settings_applies_next_start),
-        checked = consoleTiming,
-        onChange = { consoleTiming = it; prefs.consoleTiming = it },
-      )
+      if (BuildConfig.DEBUG) {
+        SwitchItem(
+          title = stringResource(R.string.settings_console_timing),
+          summary = stringResource(R.string.settings_console_timing_desc) + " " +
+            stringResource(R.string.settings_applies_next_start),
+          checked = consoleTiming,
+          onChange = { consoleTiming = it; prefs.consoleTiming = it },
+        )
+      }
 
       NetworkSettings(prefs, onInsignia)
 

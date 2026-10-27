@@ -33,6 +33,8 @@ bool nc_option(NcOptions *o, const char *arg)
         o->uncap = true;
     } else if (!strcmp(arg, "relaunch")) {
         nc_core_set_relaunch(true);
+    } else if (!strcmp(arg, "dash")) {
+        nc_core_set_dashboard(true);            /* no disc: the disc argument is "none" */
     } else if ((v = value(arg, "loadstate="))) {
         nc_core_set_loadstate(v);
         nc_log("hakuX-app", "savestate %s", v);

@@ -791,6 +791,16 @@ static uint64_t MmPersistContiguousMemory(NcKernel *k, NcFrame *f, const uint32_
     return 0;
 }
 
+void nc_mm_keep_drop(uint32_t va)
+{
+    for (unsigned i = 0; i < g_nkept; i++) {
+        if (g_kept[i].va == va) {
+            g_kept[i] = g_kept[--g_nkept];
+            return;
+        }
+    }
+}
+
 static void kept_file(char *out, size_t n)
 {
     snprintf(out, n, "%s/../kept.bin", nc_io_hdd_root());

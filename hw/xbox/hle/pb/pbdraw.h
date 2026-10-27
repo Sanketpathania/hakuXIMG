@@ -94,6 +94,12 @@ bool hle_pbd_scan_due(void);
  * NV2A scans the memory out: a loading prompt or screen drawn into the front
  * buffer shows); first, a swap its flip came before, if no flip followed. */
 void hle_pbd_scanout(void);
+/* Decode thread: the frame buffer AvSetDisplayMode gave, when the title has
+ * no GPU device (it draws its frames with the CPU: nxdk homebrew such as
+ * Insignia's Setup Assistant), shown as the memory holds it; the scanout
+ * shows it again as the CPU writes it. A title with a device keeps its own
+ * flips. */
+void hle_pbd_cpu_display(uint32_t pa);
 /* Any thread: guest memory [pa, pa + len) is kept for the next title (a quick
  * reboot): the decode thread writes the images over it back into it when it
  * is next idle. hle_pbd_keep_wait: until those copies are in memory (false:

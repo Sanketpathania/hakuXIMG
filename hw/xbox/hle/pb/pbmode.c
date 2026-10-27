@@ -107,6 +107,8 @@ static struct {
     bool overlay_req;                   /* hle_pb_overlay_changed's */
     bool overlay_show;
     bool scan_req;                      /* hle_pb_vblank's */
+    uint32_t fb_pa;                     /* hle_pb_display_fb's, for the decode thread */
+    bool fb_req;
     uint8_t gamma[3][256];              /* hle_pb_gamma's, for the decode thread */
     bool gamma_req;
     bool gamma_set;                     /* ... once at least (a savestate applies it again) */
@@ -164,6 +166,16 @@ void hle_pb_display_start(uint32_t pa)
         __atomic_store_n(&g_pb.disp_flip, true, __ATOMIC_RELAXED);
     }
     __atomic_store_n(&g_pb.disp_req, true, __ATOMIC_RELEASE);
+    hle_pb_kick();
+}
+
+void hle_pb_display_fb(uint32_t pa)
+{
+    if (!g_pb.on) {
+        return;
+    }
+    __atomic_store_n(&g_pb.fb_pa, pa, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_pb.fb_req, true, __ATOMIC_RELEASE);
     hle_pb_kick();
 }
 
@@ -843,6 +855,9 @@ static void consume_pass(void)
     if (__atomic_exchange_n(&g_pb.disp_req, false, __ATOMIC_ACQ_REL)) {
         hle_pbd_display(__atomic_load_n(&g_pb.disp_pa, __ATOMIC_RELAXED),
                         __atomic_exchange_n(&g_pb.disp_flip, false, __ATOMIC_ACQ_REL));
+    }
+    if (__atomic_exchange_n(&g_pb.fb_req, false, __ATOMIC_ACQ_REL)) {
+        hle_pbd_cpu_display(__atomic_load_n(&g_pb.fb_pa, __ATOMIC_RELAXED));
     }
     if (__atomic_exchange_n(&g_pb.scan_req, false, __ATOMIC_ACQ_REL)) {
         hle_pbd_scanout();

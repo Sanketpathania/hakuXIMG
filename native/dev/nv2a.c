@@ -693,9 +693,12 @@ void nc_dev_nv2a_refresh(unsigned hz)
     }
 }
 
-void nc_dev_nv2a_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz)
+void nc_dev_nv2a_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz, uint32_t fb)
 {
     hle_pb_display_mode(pitch, xfmt, hz);
+    if (fb) {
+        hle_pb_display_fb(fb);
+    }
 }
 
 void nc_dev_nv2a_vblank_multiply(unsigned n)

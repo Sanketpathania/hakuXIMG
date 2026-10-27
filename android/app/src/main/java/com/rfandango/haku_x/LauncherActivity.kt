@@ -18,6 +18,7 @@ import com.rfandango.haku_x.data.Game
 import com.rfandango.haku_x.data.PreviousVersion
 import com.rfandango.haku_x.data.SaveStateStore
 import com.rfandango.haku_x.data.Storage
+import com.rfandango.haku_x.data.hdd.Dashboard
 import com.rfandango.haku_x.data.hdd.HddStore
 import com.rfandango.haku_x.input.InputCapture
 import com.rfandango.haku_x.ui.HakuXApp
@@ -78,6 +79,13 @@ class LauncherActivity : ComponentActivity() {
             runCatching { store.thumb(slot).copyTo(held, overwrite = true) }.onFailure { held.delete() }
             startCore(game.uri, game.relativePath, game.title, launchedExternally = false,
                       state = store.state(slot).absolutePath)
+          },
+          onLaunchDashboard = {
+            Log.i(TAG, "launch: the dashboard")
+            /* not remembered as the last game: no disc */
+            startActivity(Intent(this, NativeCoreActivity::class.java)
+              .putExtra(NativeCoreActivity.EXTRA_DVD_URI, Dashboard.URI))
+            finish()
           },
         )
       }

@@ -987,6 +987,97 @@ static uint64_t RtlTryEnterCriticalSection(NcKernel *k, NcFrame *f, const uint32
     return 0;
 }
 
+/* ---------------------------------------------------- read/write locks */
+
+/* ERWLOCK { LockCount (-1 free), WritersWaitingCount, ReadersWaitingCount,
+ * ReadersEntryCount, KEVENT WriterEvent, KSEMAPHORE ReaderSemaphore }: the
+ * Xbox kernel's algorithm (the dashboard's); the guest's one CPU runs a call
+ * whole, as its kernel does with interrupts off. */
+#define RW_LOCK_COUNT     0x00
+#define RW_WRITERS_WAIT   0x04
+#define RW_READERS_WAIT   0x08
+#define RW_READERS_ENTRY  0x0C
+#define RW_WRITER_EVENT   0x10
+#define RW_READER_SEM     0x20
+
+static void rw_add(NcKernel *k, uint32_t va, int32_t d)
+{
+    nc_vm_wr32(k->vm, va, nc_vm_rd32(k->vm, va) + (uint32_t)d);
+}
+
+/* ExInitializeReadWriteLock(ReadWriteLock) */
+static uint64_t ExInitializeReadWriteLock(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    nc_vm_wr32(k->vm, a[0] + RW_LOCK_COUNT, 0xFFFFFFFFu);
+    nc_vm_wr32(k->vm, a[0] + RW_WRITERS_WAIT, 0);
+    nc_vm_wr32(k->vm, a[0] + RW_READERS_WAIT, 0);
+    nc_vm_wr32(k->vm, a[0] + RW_READERS_ENTRY, 0);
+    init_header(k, a[0] + RW_WRITER_EVENT, OBJ_SYNCHRONIZATION_EVENT, 4, 0);
+    init_header(k, a[0] + RW_READER_SEM, OBJ_SEMAPHORE, 5, 0);
+    nc_vm_wr32(k->vm, a[0] + RW_READER_SEM + SEMAPHORE_LIMIT, 0x7FFFFFFFu);
+    return 0;
+}
+
+/* ExAcquireReadWriteLockExclusive(ReadWriteLock) */
+static uint64_t ExAcquireReadWriteLockExclusive(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    rw_add(k, a[0] + RW_LOCK_COUNT, 1);
+    if (nc_vm_rd32(k->vm, a[0] + RW_LOCK_COUNT) != 0) {
+        rw_add(k, a[0] + RW_WRITERS_WAIT, 1);
+        const uint32_t ev = a[0] + RW_WRITER_EVENT;
+        wait(k, &ev, 1, false, 0, 0, false);
+    }
+    return 0;
+}
+
+/* ExAcquireReadWriteLockShared(ReadWriteLock): readers wait while a writer
+ * holds it or one waits for it */
+static uint64_t ExAcquireReadWriteLockShared(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    const bool held = (int32_t)nc_vm_rd32(k->vm, a[0] + RW_LOCK_COUNT) >= 0;
+    const bool must_wait = held && (nc_vm_rd32(k->vm, a[0] + RW_READERS_ENTRY) == 0 ||
+                                    nc_vm_rd32(k->vm, a[0] + RW_WRITERS_WAIT) != 0);
+    rw_add(k, a[0] + RW_LOCK_COUNT, 1);
+    if (must_wait) {
+        rw_add(k, a[0] + RW_READERS_WAIT, 1);
+        const uint32_t sem = a[0] + RW_READER_SEM;
+        wait(k, &sem, 1, false, 0, 0, false);
+    } else {
+        rw_add(k, a[0] + RW_READERS_ENTRY, 1);
+    }
+    return 0;
+}
+
+/* ExReleaseReadWriteLock(ReadWriteLock): a writer leaving lets every waiting
+ * reader in, else the next writer; the last reader leaving lets a writer in */
+static uint64_t ExReleaseReadWriteLock(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    const uint32_t l = a[0];
+    rw_add(k, l + RW_LOCK_COUNT, -1);
+    if ((int32_t)nc_vm_rd32(k->vm, l + RW_LOCK_COUNT) == -1) {
+        nc_vm_wr32(k->vm, l + RW_READERS_ENTRY, 0);
+        return 0;
+    }
+    if (nc_vm_rd32(k->vm, l + RW_READERS_ENTRY) == 0) {
+        const uint32_t readers = nc_vm_rd32(k->vm, l + RW_READERS_WAIT);
+        if (readers) {
+            nc_vm_wr32(k->vm, l + RW_READERS_WAIT, 0);
+            nc_vm_wr32(k->vm, l + RW_READERS_ENTRY, readers);
+            uint32_t status;
+            release_semaphore(k, l + RW_READER_SEM, (int32_t)readers, &status);
+            return 0;
+        }
+    } else {
+        rw_add(k, l + RW_READERS_ENTRY, -1);
+        if (nc_vm_rd32(k->vm, l + RW_READERS_ENTRY) != 0) {
+            return 0;
+        }
+    }
+    rw_add(k, l + RW_WRITERS_WAIT, -1);
+    set_event(k, l + RW_WRITER_EVENT);
+    return 0;
+}
+
 /* KeEnterCriticalRegion() / KeLeaveCriticalRegion(): kernel APCs are not delivered yet. */
 static uint64_t KeCriticalRegion(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
@@ -1268,6 +1359,10 @@ void nc_ke_register(NcKernel *k)
     nc_kernel_impl(k, "RtlEnterCriticalSection", RtlEnterCriticalSection);
     nc_kernel_impl(k, "RtlLeaveCriticalSection", RtlLeaveCriticalSection);
     nc_kernel_impl(k, "RtlTryEnterCriticalSection", RtlTryEnterCriticalSection);
+    nc_kernel_impl(k, "ExInitializeReadWriteLock", ExInitializeReadWriteLock);
+    nc_kernel_impl(k, "ExAcquireReadWriteLockExclusive", ExAcquireReadWriteLockExclusive);
+    nc_kernel_impl(k, "ExAcquireReadWriteLockShared", ExAcquireReadWriteLockShared);
+    nc_kernel_impl(k, "ExReleaseReadWriteLock", ExReleaseReadWriteLock);
     nc_kernel_impl(k, "KeEnterCriticalRegion", KeCriticalRegion);
     nc_kernel_impl(k, "KeLeaveCriticalRegion", KeCriticalRegion);
 

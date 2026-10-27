@@ -806,16 +806,10 @@ static bool rtlog_on(void)
     return on;
 }
 
-/* The CPU wrote render target id's memory since it was last looked at (a
- * movie frame copied into the frame buffer: Riddick's Bink): its rows go
- * into the image before the GPU draws on it or shows it. True if they did.
- * used: the target counts as one the CPU uses (writeback at each unbind). */
-static bool rt_cpu_upload(uint32_t id, bool used)
+/* Target id's memory into its image, whatever was written; used: as
+ * rt_cpu_upload's. */
+static void rt_upload(PbObj *o, uint32_t id, bool used)
 {
-    PbObj *o = obj_of(id);
-    if (!o || !o->d.pitch || !obj_written(o)) {
-        return false;
-    }
     obj_edges_set(o);
     const HleRect r = { 0, 0, (int32_t)o->d.w, (int32_t)o->d.h };
     const int32_t pt[1][2] = { { 0, 0 } };
@@ -827,6 +821,19 @@ static bool rt_cpu_upload(uint32_t id, bool used)
         hle_log("hakuX-hle-pb", "rt upload %u: %08x %ux%u pitch %u fmt %02x swap %llu", id,
                 o->d.pa, o->d.w, o->d.h, o->d.pitch, o->d.xfmt, (unsigned long long)g_pd.swaps);
     }
+}
+
+/* The CPU wrote render target id's memory since it was last looked at (a
+ * movie frame copied into the frame buffer: Riddick's Bink): its rows go
+ * into the image before the GPU draws on it or shows it. True if they did.
+ * used: the target counts as one the CPU uses (writeback at each unbind). */
+static bool rt_cpu_upload(uint32_t id, bool used)
+{
+    PbObj *o = obj_of(id);
+    if (!o || !o->d.pitch || !obj_written(o)) {
+        return false;
+    }
+    rt_upload(o, id, used);
     return true;
 }
 
@@ -1452,6 +1459,31 @@ void hle_pbd_scanout(void)
                 "flip: shown again (first 4 logged)", cpu ? "CPU" : "GPU", g_pd.shown_id);
     }
     present_now(g_pd.shown_id);
+}
+
+void hle_pbd_cpu_display(uint32_t pa)
+{
+    uint32_t pitch, xfmt, w, h, seq;
+    unsigned hz;
+    if (!g_pd.on || g_pd.device) {
+        return;                             /* D3D's: its own frames, flipped */
+    }
+    hle_pb_display_mode_get(&pitch, &xfmt, &hz);
+    if (!mode_size(0, &w, &h, &seq)) {
+        hle_log("hakuX-hle-pb", "frame buffer %08x: no video mode it fits (pitch %u format %02x): not shown", pa,
+                pitch, xfmt);
+        return;
+    }
+    device(w, h);
+    const uint32_t id = object(pa & 0x0FFFFFFFu, xfmt, pitch, w, h);
+    PbObj *o = obj_of(id);
+    if (!o) {
+        return;
+    }
+    rt_upload(o, id, false);
+    present_now(id);
+    hle_log("hakuX-hle-pb", "frame buffer %08x %ux%u format %02x: the title draws it with the CPU (no GPU device), "
+            "shown as written", pa, w, h, xfmt);
 }
 
 void hle_pbd_gamma(const uint8_t rgb[3][256])

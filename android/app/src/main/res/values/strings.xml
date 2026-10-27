@@ -12,6 +12,7 @@
 
   <string name="library_search_hint">Search games</string>
   <string name="library_refresh">Refresh</string>
+  <string name="library_dashboard">Dashboard</string>
   <string name="library_no_folder">No folder selected</string>
   <string name="library_loading_games">Loading games</string>
   <string name="library_loading_discs">Reading discs: %1$d of %2$d</string>
@@ -160,9 +161,13 @@
   <string name="settings_clock">Clock</string>
   <string name="settings_clock_desc">Games date their saves by it, and some hold events on given days. Takes effect at the next game start; a savestate goes on from the time it was made at.</string>
   <string name="settings_section_network">Network</string>
-  <string name="settings_network_desc">System link: play with the consoles on your network, or over the Internet through XLink Kai. The games find each other as they would on a LAN.</string>
-  <string name="settings_network_mode">System link</string>
+  <string name="settings_network_desc">Xbox Live through Insignia, or system link: play with the consoles on your network, or over the Internet through XLink Kai, the games finding each other as they would on a LAN.</string>
+  <string name="settings_network_mode">Connection</string>
   <string name="settings_network_off">Off (no cable)</string>
+  <string name="settings_network_insignia">Xbox Live: Insignia</string>
+  <string name="settings_network_insignia_dns">DNS server</string>
+  <string name="settings_network_insignia_dns_default">Insignia\'s (%1$s)</string>
+  <string name="settings_network_insignia_dns_desc">Change it only if your Internet provider blocks Insignia\'s: the address of a computer running insigniaDNS on this network.</string>
   <string name="settings_network_lan">LAN: consoles on this network</string>
   <string name="settings_network_kai_mode">XLink Kai: over the Internet</string>
   <string name="settings_network_peers">Other consoles</string>
@@ -413,6 +418,13 @@
   <string name="hdd_saves_import_foreign_nokeys">They come from a console or xemu. Without the console files (From an Xbox or xemu) they come in as they are, and games that check signatures report them as damaged.</string>
   <string name="hdd_import">Import a disk image</string>
   <string name="hdd_import_desc">xemu\'s (qcow2) or a raw dump. It replaces this console\'s saves, game data, caches and system files; its saves are re-signed for hakuX.</string>
+  <string name="hdd_dashboard">Dashboard</string>
+  <string name="hdd_dashboard_install">Install the dashboard</string>
+  <string name="hdd_dashboard_desc">The Xbox dashboard\'s files (5960) from a zip, onto the C: drive. Xbox Live accounts, Insignia\'s, are made in it: the library\'s Dashboard button starts it.</string>
+  <string name="hdd_dashboard_installed">Installed: the library\'s Dashboard button starts it. Choose a zip to install it again.</string>
+  <string name="hdd_dashboard_installing">Installing the dashboard</string>
+  <string name="hdd_dashboard_done">Dashboard installed</string>
+  <string name="hdd_dashboard_failed">The dashboard couldn\'t be installed</string>
   <string name="hdd_import_confirm_title">Replace the hard disk?</string>
   <string name="hdd_import_confirm">Everything on this console\'s hard disk is replaced by the image\'s contents. Back it up first (Back up everything) to keep a copy.</string>
   <string name="hdd_importing">Importing the disk image</string>

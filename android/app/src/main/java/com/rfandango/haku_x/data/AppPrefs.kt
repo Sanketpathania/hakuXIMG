@@ -131,7 +131,10 @@ class AppPrefs(context: Context) {
     get() = sp.getString(KEY_AV_PACK, AV_HDTV) ?: AV_HDTV
     set(value) = sp.edit { putString(KEY_AV_PACK, value) }
 
-  /** The console's network: off, lan (system link with consoles on this network) or kai (XLink Kai). */
+  /**
+   * The console's network: off, lan (system link with consoles on this network), kai (XLink Kai) or
+   * insignia (the Internet through NAT: Xbox Live via Insignia).
+   */
   var networkMode: String
     get() = sp.getString(KEY_NETWORK, NET_OFF) ?: NET_OFF
     set(value) = sp.edit { putString(KEY_NETWORK, value) }
@@ -145,6 +148,11 @@ class AppPrefs(context: Context) {
   var kaiEngine: String
     get() = sp.getString(KEY_KAI_ENGINE, "") ?: ""
     set(value) = sp.edit { putString(KEY_KAI_ENGINE, value) }
+
+  /** Insignia: the DNS server the console is given, "" Insignia's own (another: insigniaDNS on this network). */
+  var insigniaDns: String
+    get() = sp.getString(KEY_INSIGNIA_DNS, "") ?: ""
+    set(value) = sp.edit { putString(KEY_INSIGNIA_DNS, value) }
 
   /** The console's language: auto (the phone's, where the Xbox has it) or one of XBOX_LANGUAGES. */
   var language: String
@@ -229,9 +237,13 @@ class AppPrefs(context: Context) {
     private const val KEY_NETWORK = "console_network"
     private const val KEY_LAN_PEERS = "network_lan_peers"
     private const val KEY_KAI_ENGINE = "network_kai_engine"
+    private const val KEY_INSIGNIA_DNS = "network_insignia_dns"
     const val NET_OFF = "off"
     const val NET_LAN = "lan"
     const val NET_KAI = "kai"
+    const val NET_INSIGNIA = "insignia"
+    /** Insignia's DNS server (insignia.live/connect): the console's primary. */
+    const val INSIGNIA_DNS = "46.101.64.175"
     private const val KEY_LANGUAGE = "console_language"
     const val LANG_AUTO = "auto"
     private const val KEY_CLOCK_OFFSET = "console_clock_offset"

@@ -16,8 +16,9 @@ uint64_t nc_dev_nv2a_vblanks(void);
 /* The video mode's refresh rate (50 or 60 Hz): the vblank clock's. */
 void nc_dev_nv2a_refresh(unsigned hz);
 /* The video mode's frame buffer pitch and format (AvSetDisplayMode): the
- * push-buffer decoder's display size. */
-void nc_dev_nv2a_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz);
+ * push-buffer decoder's display size; fb, the frame buffer it shows (a title
+ * drawing it with the CPU). */
+void nc_dev_nv2a_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz, uint32_t fb);
 /* A mod's vblank: n times the video mode's rate (1-4; before the title boots). */
 void nc_dev_nv2a_vblank_multiply(unsigned n);
 /* A vsync of the panel the frames are shown on (host monotonic ns, the

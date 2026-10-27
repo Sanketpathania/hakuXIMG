@@ -40,6 +40,10 @@ void hle_pb_display_start(uint32_t pa);
  * counts the modes set). */
 void hle_pb_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz);
 uint32_t hle_pb_display_mode_get(uint32_t *pitch, uint32_t *xfmt, unsigned *hz);
+/* AvSetDisplayMode (any thread), after hle_pb_display_mode: the frame buffer
+ * the display scans out; one a title draws with the CPU, having no GPU
+ * device, is shown (hle_pbd_cpu_display). */
+void hle_pb_display_fb(uint32_t pa);
 /* The vblank thread, each vblank: when the title hasn't flipped for a while,
  * the decode thread looks whether the CPU changed the frame on screen
  * (hle_pbd_scanout). */

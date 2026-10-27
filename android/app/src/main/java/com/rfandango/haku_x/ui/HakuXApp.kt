@@ -73,6 +73,8 @@ fun HakuXApp(
   onLaunchGame: (Game) -> Unit,
   /** Start a game right into one of its savestates (the library's Load state). */
   onLaunchState: (Game, SaveStateStore, Int) -> Unit,
+  /** Start the dashboard (installed on C:), with no disc. */
+  onLaunchDashboard: () -> Unit,
 ) {
   val nav = rememberNavController()
   // A newer release on GitHub, looked for once as the app's screens start: told in a toast, the
@@ -125,6 +127,7 @@ fun HakuXApp(
       LibraryScreen(
         onLaunch = onLaunchGame,
         onLoadState = onLaunchState,
+        onDashboard = onLaunchDashboard,
         onOpenSettings = { nav.navigate(Routes.SETTINGS) },
         onGameSettings = { game, disc ->
           val key = GameOverrides.gameKey(disc?.titleId ?: 0L, disc?.version ?: 0L, game.relativePath)

@@ -39,6 +39,7 @@
 #define STATUS_OBJECT_PATH_NOT_FOUND  0xC000003Au
 #define STATUS_DELETE_PENDING         0xC0000056u
 #define STATUS_MEDIA_WRITE_PROTECTED  0xC00000A2u
+#define STATUS_NO_MEDIA_IN_DEVICE     0xC0000013u
 #define STATUS_FILE_IS_A_DIRECTORY    0xC00000BAu
 #define STATUS_NOT_A_DIRECTORY        0xC0000103u
 #define STATUS_DIRECTORY_NOT_EMPTY    0xC0000101u
@@ -320,6 +321,26 @@ static int device_of(const char *path, const char **rel)
         return part;
     }
     return -2;
+}
+
+static int host_path(int part, const char *rel, char *out, size_t cap);
+
+bool nc_io_host_file(const char *xbox_path, char *out, size_t n)
+{
+    char path[512];
+    const char *rel;
+    if (!canon(xbox_path, path, sizeof(path))) {
+        return false;
+    }
+    const int part = device_of(path, &rel);
+    struct stat st;
+    return part >= 1 && part <= 5 && *rel && host_path(part, rel, out, n) == 1 && stat(out, &st) == 0 &&
+           S_ISREG(st.st_mode);
+}
+
+void nc_io_set_launch_dir(const char *dir)
+{
+    link_set("\\??\\D:", dir);
 }
 
 static bool mkdirs(const char *path)
@@ -660,7 +681,7 @@ static void *reader_thread(void *arg)
         for (unsigned i = 0; j.ok && i < j.nseg; i++) {
             const struct DmaSeg *g = &j.seg[i];
             j.ok = j.fd >= 0 ? pread(j.fd, g->host, g->len, (off_t)o) == (ssize_t)g->len
-                             : nc_disc_read(j.disc, &j.file, o, g->host, g->len);
+                             : nc_disc_read_file(j.disc, &j.file, o, g->host, g->len);
             o += g->len;
         }
         j.err = j.ok ? 0 : errno;
@@ -945,6 +966,9 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t attrs, uint32_t d
         return in_dir ? STATUS_OBJECT_NAME_NOT_FOUND : STATUS_OBJECT_PATH_NOT_FOUND;
     }
     if (dev == -1) {
+        if (k->disc->fd < 0 && !k->disc->ov) {
+            return STATUS_NO_MEDIA_IN_DEVICE;   /* the dashboard booted with the tray empty */
+        }
         if (disposition != FILE_OPEN && disposition != FILE_OPEN_IF) {
             return STATUS_MEDIA_WRITE_PROTECTED;
         }
@@ -1146,6 +1170,40 @@ static void raw_io(int part, uint64_t off, uint8_t *buf, uint32_t len, bool writ
     close(fd);
 }
 
+/* ExReadWriteRefurbInfo(RefurbInfo, ValueLength, DoWrite): XBOX_REFURB_INFO
+ * { Signature, PowerCycleCount, FirstSetTime } in the config area's sector 3;
+ * read without its signature there, zeros. */
+#define REFURB_SECTOR    3
+#define REFURB_SIGNATURE 0x52465242u    /* 'RFRB' */
+
+static uint64_t ExReadWriteRefurbInfo(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    if (a[1] != 16) {
+        return 0xC000000Du;             /* STATUS_INVALID_PARAMETER */
+    }
+    uint8_t sector[512];
+    raw_io(0, REFURB_SECTOR * 512, sector, sizeof(sector), false);
+    uint8_t *info = nc_vm_host(k->vm, a[0]);
+    if (a[2] & 0xFF) {
+        memcpy(sector, info, 16);
+        nc_wr32(sector, REFURB_SIGNATURE);
+        raw_io(0, REFURB_SECTOR * 512, sector, sizeof(sector), true);
+    } else if (nc_rd32(sector) == REFURB_SIGNATURE) {
+        memcpy(info, sector, 16);
+    } else {
+        memset(info, 0, 16);
+    }
+    return NC_STATUS_SUCCESS;
+}
+
+/* IoDismountVolumeByName(DeviceName): the volumes are host folders, with
+ * nothing cached to write back; the dashboard dismounts the disc and the
+ * drives it formats. */
+static uint64_t IoDismountVolumeByName(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    return NC_STATUS_SUCCESS;
+}
+
 /* The offset an NtReadFile/NtWriteFile works at: ByteOffset, or the file position. */
 static uint64_t io_offset(NcKernel *k, const NcFile *nf, uint32_t byte_offset)
 {
@@ -1276,7 +1334,7 @@ static uint64_t NtReadFile(NcKernel *k, NcFrame *f, const uint32_t *a)
             return STATUS_PENDING;
         }
         nc_vm_will_write(a[5], n); /* pread into a protected page fails rather than faults */
-        bool ok = nf->kind == F_DISC ? nc_disc_read(k->disc, &nf->disc, off, nc_vm_host(k->vm, a[5]), n)
+        bool ok = nf->kind == F_DISC ? nc_disc_read_file(k->disc, &nf->disc, off, nc_vm_host(k->vm, a[5]), n)
                                      : pread(nf->fd, nc_vm_host(k->vm, a[5]), n, (off_t)off) == (ssize_t)n;
         if (!ok) {
             nc_log("hakuX-native-io", "read %s +%llx (%u) into %08x failed: %s", nf->path, (unsigned long long)off, n,
@@ -2392,6 +2450,9 @@ void nc_io_register(NcKernel *k)
 {
     g_trace_io = getenv("NC_TRACE_IO") != NULL;
     link_set("\\??\\D:", "\\Device\\CdRom0");
+    link_set("\\??\\CdRom0:", "\\Device\\CdRom0");     /* the kernel's own, as on the Xbox (the dashboard's) */
+    nc_kernel_impl(k, "ExReadWriteRefurbInfo", ExReadWriteRefurbInfo);
+    nc_kernel_impl(k, "IoDismountVolumeByName", IoDismountVolumeByName);
 
     nc_kernel_impl(k, "NtCreateFile", NtCreateFile);
     nc_kernel_impl(k, "NtOpenFile", NtOpenFile);

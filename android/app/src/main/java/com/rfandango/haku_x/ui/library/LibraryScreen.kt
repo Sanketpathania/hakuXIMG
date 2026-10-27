@@ -32,6 +32,7 @@ import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -108,6 +109,8 @@ import com.rfandango.haku_x.data.ModCatalog
 import com.rfandango.haku_x.data.SaveStateStore
 import com.rfandango.haku_x.data.Updates
 import com.rfandango.haku_x.data.XisoConverter
+import com.rfandango.haku_x.data.hdd.Dashboard
+import com.rfandango.haku_x.data.hdd.HddStore
 import com.rfandango.haku_x.ui.common.ConfirmDialog
 import com.rfandango.haku_x.ui.common.ProgressBlock
 import com.rfandango.haku_x.ui.common.ThumbnailShape
@@ -125,13 +128,18 @@ fun LibraryScreen(
   onLoadState: (Game, SaveStateStore, Int) -> Unit,
   /** The game's mods and cheats (a disc whose title has some, mods/). */
   onMods: (Game, DiscInfo) -> Unit,
+  /** The dashboard started (shown once installed on C:, Dashboard). */
+  onDashboard: () -> Unit,
   vm: LibraryViewModel = viewModel(),
 ) {
+  val context = LocalContext.current
   val state by vm.state.collectAsStateWithLifecycle()
   val update by Updates.available.collectAsStateWithLifecycle()
   var updateDialog by remember { mutableStateOf(false) }
+  var dashboard by remember { mutableStateOf(false) }
   LifecycleResumeEffect(Unit) {
     vm.onResume()
+    dashboard = Dashboard.installed(HddStore(context).root)
     onPauseOrDispose {}
   }
 
@@ -151,6 +159,12 @@ fun LibraryScreen(
               contentDescription = stringResource(R.string.update_available_icon),
               tint = MaterialTheme.colorScheme.primary,
             )
+          }
+        }
+        // the dashboard (Xbox Live's account sign-up), once it's on C:
+        if (dashboard) {
+          IconButton(onClick = onDashboard, modifier = Modifier.padding(start = 4.dp)) {
+            Icon(Icons.Filled.Home, contentDescription = stringResource(R.string.library_dashboard))
           }
         }
         // the folders listed again, as a pull does (a controller can't pull)

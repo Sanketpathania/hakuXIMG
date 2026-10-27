@@ -16,7 +16,7 @@
 
 #define TX_SLOTS 128
 #define RX_SLOTS 256
-#define MAX_FDS 64
+#define MAX_FDS 256                     /* nat: a socket per connection */
 
 typedef struct Frame {
     uint16_t len;

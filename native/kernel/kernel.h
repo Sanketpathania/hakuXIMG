@@ -176,8 +176,9 @@ typedef struct NcRange {
 struct NcKernel {
     NcVm *vm;
     NcCpu *cpu;
-    const struct NcDisc *disc;            /* the title's disc */
-    const struct NcDiscFile *xbe_file;    /* its default.xbe */
+    const struct NcDisc *disc;            /* the title's disc (fd < 0: the tray is empty) */
+    const struct NcDiscFile *xbe_file;    /* the running XBE on it */
+    int xbe_fd;                           /* or its host file (a hard disk partition's), else -1 */
     uint32_t xbe_base;
     uint32_t xbe_size;                    /* SizeOfImage */
     uint32_t game_region;                 /* from the XBE certificate: 1 NA, 2 JP, 4 elsewhere */
@@ -394,8 +395,9 @@ void nc_kernel_apu_spin(NcKernel *k, NcFrame *f);
 /* seh.c: RtlRaiseException and RtlUnwind, and their stubs. */
 void nc_seh_register(NcKernel *k);
 void nc_seh_stub(NcKernel *k, NcFrame *f, unsigned ordinal);
-/* After the XBE is loaded: what the kernel exposes about the title. */
-void nc_kernel_title_loaded(NcKernel *k, const struct NcDisc *disc, const struct NcDiscFile *xbe,
+/* After the XBE is loaded: what the kernel exposes about the title. xbe_fd:
+ * the XBE's host file when it isn't on the disc (else -1). */
+void nc_kernel_title_loaded(NcKernel *k, const struct NcDisc *disc, const struct NcDiscFile *xbe, int xbe_fd,
                             uint32_t xbe_base, uint32_t image_size);
 /* ex.c: XboxHDKey, the key saves locked to the console are signed with: the
  * HD key in the EEPROM's encrypted section, or, for an image from before
@@ -417,9 +419,13 @@ void nc_kernel_set_hd_key(NcKernel *k);
 /* set while the vCPU runs a system op (a kernel call, an HLE hook) */
 extern volatile int g_nc_in_sysop;
 void nc_kernel_relaunch_file(char *out, size_t n);
-/* The launch page's XBE as a path on the disc ("\morrowind.xbe"), false when it
- * names no disc file. */
+/* The launch page's XBE as a device path: on the disc ("\Device\CdRom0\morrowind.xbe")
+ * or a hard disk partition ("\Device\Harddisk0\Partition2\xboxdash.xbe"); false
+ * when it names neither. */
 bool nc_kernel_launch_xbe(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t n);
+/* The dashboard, booted when a title asks for one of its pages (Xbox Live's
+ * account sign-up, its network settings) or by itself (the app's Dashboard). */
+#define NC_DASHBOARD_PATH "\\Device\\Harddisk0\\Partition2\\xboxdash.xbe"
 /* After title_loaded on a relaunch: a contiguous page with page's contents
  * becomes LaunchDataPage. */
 void nc_kernel_launch_page_restore(NcKernel *k, const uint8_t page[NC_LAUNCH_PAGE]);
@@ -476,6 +482,11 @@ uint64_t nc_ke_interrupt_time(void);
  * nc_mm_kept lists the kept ranges' physical addresses and sizes. */
 void nc_mm_keep_save(NcKernel *k, uint32_t saved);
 uint32_t nc_mm_keep_restore(NcKernel *k);
+/* The kept range at va kept no more: the launch data page XLaunchNewImage
+ * persists goes to the next boot in the relaunch file (a new page there);
+ * kept as well, its old page stayed allocated mid-memory relaunch after
+ * relaunch, and Forza's updated XBE found no 30 MB contiguous run. */
+void nc_mm_keep_drop(uint32_t va);
 unsigned nc_mm_kept(uint32_t *pa, uint32_t *len, unsigned max);
 /* AvSetSavedDataAddress's address, as the last title left it (a relaunch). */
 void nc_kernel_av_saved_set(uint32_t va);
@@ -536,6 +547,12 @@ void nc_xc_register(NcKernel *k);
 /* Where the hard disk's partitions live on the host (PartitionN under it). */
 void nc_io_set_hdd_root(const char *path);
 const char *nc_io_hdd_root(void);
+/* A file on a hard disk partition ("\Device\Harddisk0\Partition2\xboxdash.xbe",
+ * names matched as FATX does): its host path in out; false when the path
+ * isn't on a partition or names no file. */
+bool nc_io_host_file(const char *xbox_path, char *out, size_t n);
+/* \??\D:, the directory the title was launched from (its XBE's). */
+void nc_io_set_launch_dir(const char *dir);
 /* A file object's handle closed (ob.c). */
 void nc_io_close(NcKernel *k, uint32_t object);
 /* Completes the overlapped disc reads the reader thread finished (cheap when

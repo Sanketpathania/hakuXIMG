@@ -11,6 +11,7 @@ enum class GameSetting(val key: String) {
   RENDER_SCALE("render_scale"),
   ASYNC_SHADERS("async_shaders"),
   PREBUILD_SHADERS("prebuild_shaders"),
+  CONSOLE_TIMING("console_timing"),
   ASPECT("aspect"),
   FXAA("fxaa"),
   UPSCALE("upscale"),
@@ -87,6 +88,7 @@ class RunSettings(private val app: AppPrefs, private val game: GameOverrides?) {
   val renderScale get() = game?.get(GameSetting.RENDER_SCALE)?.toIntOrNull() ?: app.renderScale
   val asyncShaders get() = bool(GameSetting.ASYNC_SHADERS, app.asyncShaders)
   val prebuildShaders get() = bool(GameSetting.PREBUILD_SHADERS, app.prebuildShaders)
+  val consoleTiming get() = bool(GameSetting.CONSOLE_TIMING, app.consoleTiming)
   val aspectRatio get() = text(GameSetting.ASPECT, app.aspectRatio)
   val fxaa get() = bool(GameSetting.FXAA, app.fxaa)
   val upscaleFilter get() = text(GameSetting.UPSCALE, app.upscaleFilter)

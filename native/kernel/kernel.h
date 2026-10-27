@@ -553,6 +553,8 @@ const char *nc_io_hdd_root(void);
 bool nc_io_host_file(const char *xbox_path, char *out, size_t n);
 /* \??\D:, the directory the title was launched from (its XBE's). */
 void nc_io_set_launch_dir(const char *dir);
+/* Console timing: reads take the console's drives' time, their thread waiting (io.c). */
+void nc_io_set_device_time(bool on);
 /* A file object's handle closed (ob.c). */
 void nc_io_close(NcKernel *k, uint32_t object);
 /* Completes the overlapped disc reads the reader thread finished (cheap when

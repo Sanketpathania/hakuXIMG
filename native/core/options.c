@@ -49,6 +49,8 @@ bool nc_option(NcOptions *o, const char *arg)
         o->async_pipe = atoi(v) != 0;
     } else if ((v = value(arg, "prebuild="))) {
         o->prebuild = atoi(v) != 0;
+    } else if ((v = value(arg, "devtime="))) {
+        nc_io_set_device_time(atoi(v) != 0);    /* console timing (native/kernel/io.c) */
     } else if ((v = value(arg, "pads="))) {
         setenv("NC_PAD_MASK", v, 1);            /* read by the USB at boot (ohci.c) */
     } else if ((v = value(arg, "video="))) {

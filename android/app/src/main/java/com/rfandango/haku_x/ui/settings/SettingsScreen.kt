@@ -83,6 +83,7 @@ fun SettingsScreen(
   var uncapped by remember { mutableStateOf(prefs.uncapped) }
   var asyncShaders by remember { mutableStateOf(prefs.asyncShaders) }
   var prebuildShaders by remember { mutableStateOf(prefs.prebuildShaders) }
+  var consoleTiming by remember { mutableStateOf(prefs.consoleTiming) }
   var showFps by remember { mutableStateOf(prefs.showFps) }
   var showHitches by remember { mutableStateOf(prefs.showHitches) }
   var scale by remember { mutableIntStateOf(prefs.renderScale) }
@@ -238,6 +239,13 @@ fun SettingsScreen(
         headlineContent = { Text(stringResource(R.string.settings_clock)) },
         supportingContent = { Text(clockLabel(clockOffset) + ". " + stringResource(R.string.settings_clock_desc)) },
         modifier = Modifier.clickable { clockDialog = true },
+      )
+      SwitchItem(
+        title = stringResource(R.string.settings_console_timing),
+        summary = stringResource(R.string.settings_console_timing_desc) + " " +
+          stringResource(R.string.settings_applies_next_start),
+        checked = consoleTiming,
+        onChange = { consoleTiming = it; prefs.consoleTiming = it },
       )
 
       NetworkSettings(prefs, onInsignia)

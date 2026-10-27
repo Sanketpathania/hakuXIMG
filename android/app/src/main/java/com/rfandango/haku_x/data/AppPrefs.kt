@@ -61,6 +61,11 @@ class AppPrefs(context: Context) {
     get() = sp.getBoolean(NativeCoreActivity.PREF_PREBUILD_SHADERS, true)
     set(value) = sp.edit { putBoolean(NativeCoreActivity.PREF_PREBUILD_SHADERS, value) }
 
+  /** Reads take the console's drives' time, the game's other threads running meanwhile (read at game start). */
+  var consoleTiming: Boolean
+    get() = sp.getBoolean(KEY_CONSOLE_TIMING, true)
+    set(value) = sp.edit { putBoolean(KEY_CONSOLE_TIMING, value) }
+
   var showFps: Boolean
     get() = sp.getBoolean(KEY_SHOW_FPS, true)
     set(value) = sp.edit { putBoolean(KEY_SHOW_FPS, value) }
@@ -230,6 +235,7 @@ class AppPrefs(context: Context) {
     private const val KEY_SETUP_COMPLETE = "setup_complete"
     private const val KEY_PREVIOUS_MIGRATED = "previous_version_migrated"
     private const val KEY_SHOW_FPS = "show_fps"
+    private const val KEY_CONSOLE_TIMING = "console_timing"
     private const val KEY_THEME = "app_theme"
     private const val KEY_TURNIP_NOTE = "turnip_note_shown"
     const val THEME_SYSTEM = "system"

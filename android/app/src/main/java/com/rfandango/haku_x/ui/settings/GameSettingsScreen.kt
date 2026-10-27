@@ -57,6 +57,7 @@ private val SECTIONS: List<Pair<Int, List<Overridable>>> = listOf(
   ),
   R.string.settings_section_console to listOf(
     Overridable(GameSetting.LANGUAGE, R.string.settings_language, LANGUAGES, { it.language }, { languageLabel(it) }),
+    Overridable(GameSetting.CONSOLE_TIMING, R.string.settings_console_timing, ON_OFF, { it.consoleTiming.toString() }, { onOff(it) }),
   ),
   R.string.settings_section_console_video to listOf(
     Overridable(GameSetting.SCREEN_FORMAT, R.string.settings_screen_format, FORMATS, { it.screenFormat }, { stringResource(formatLabel(it)) }),

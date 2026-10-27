@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <time.h>
 #include <unistd.h>
 
 #define STATUS_NO_MORE_FILES          0x80000006u
@@ -146,6 +147,13 @@ typedef struct NcFile {
 #define FCB_FATX_CLUSTER 0x1Cu
 
 static NcFile g_files[MAX_FILES];
+/* Console timing: each open file's pages in the file system's cache, those
+ * its last read from the drive brought in ([lo, hi), FS_PAGE pages). A read
+ * inside them takes no drive time; not kept in states. */
+#define FS_PAGE 4096u
+static struct FsCache {
+    uint64_t lo, hi;
+} g_fs_cache[MAX_FILES];
 typedef struct NcLink {
     char name[64];
     char target[256];
@@ -396,6 +404,7 @@ static NcFile *file_new(void)
     for (int i = 0; i < MAX_FILES; i++) {
         if (!g_files[i].used) {
             memset(&g_files[i], 0, sizeof(g_files[i]));
+            g_fs_cache[i] = (struct FsCache){0};
             g_files[i].used = true;
             g_files[i].fd = -1;
             return &g_files[i];
@@ -629,6 +638,46 @@ static void complete(NcKernel *k, const uint32_t *a)
  * reported dirty when the read completes (nc_vm_dma). */
 #define DISC_JOBS 64
 
+/* Console timing (the app's setting, nc_io_set_device_time): a read takes at
+ * least the time the console's drives take at their best, and the thread
+ * that asked waits it out. At the phone's speed a load ran without its
+ * thread ever waiting, so the game's lower-priority threads didn't run
+ * until it was done: Morrowind starts its loading screen's thread as a cell
+ * load begins, and on the Xbox the thread sets up its first picture while
+ * the load still reads. A load done first (a cell it held) found that
+ * setup half done, asked the thread to end and waited for it, while the
+ * thread waited for that request to clear: a freeze leaving a building.
+ * So every synchronous read the file system's cache doesn't hold goes to
+ * the reader, its caller waiting (NtReadFile), and the reader spends a
+ * request's time plus the transfer at the drive's rate on each, one at a
+ * time. NC_DEVTIME="disc_us,disc_kBps,hdd_us,hdd_kBps" tunes the drives. */
+static bool g_devtime;
+static struct DevRate {
+    uint32_t req_us, kbps;
+} g_dev_disc = {500, 6900},     /* the DVD drive at 5x */
+  g_dev_hdd = {200, 20000};     /* the hard disk */
+
+void nc_io_set_device_time(bool on)
+{
+    g_devtime = on;
+    const char *e = getenv("NC_DEVTIME");
+    if (e) {
+        sscanf(e, "%u,%u,%u,%u", &g_dev_disc.req_us, &g_dev_disc.kbps, &g_dev_hdd.req_us, &g_dev_hdd.kbps);
+    }
+    nc_log("hakuX-native-io", "console timing %s: disc %u us + %u kB/s, hard disk %u us + %u kB/s", on ? "on" : "off",
+           g_dev_disc.req_us, g_dev_disc.kbps, g_dev_hdd.req_us, g_dev_hdd.kbps);
+}
+
+/* The drive's time for n bytes of nf (console timing on), in microseconds. */
+static uint32_t device_us(const NcFile *nf, uint32_t n)
+{
+    if (!g_devtime) {
+        return 0;
+    }
+    const struct DevRate *r = nf->kind == F_DISC ? &g_dev_disc : &g_dev_hdd;
+    return r->req_us + (r->kbps ? (uint32_t)((uint64_t)n * 1000 / r->kbps) : 0);
+}
+
 typedef struct DiscJob {
     const NcDisc *disc;
     NcDiscFile file;
@@ -641,6 +690,7 @@ typedef struct DiscJob {
     unsigned nseg;
     uint64_t gpu;            /* the GPU value to wait for first (nc_vm_dma.fence), or 0 */
     uint32_t va, n;
+    uint32_t dev_us;         /* the drive's time for it (console timing), 0: none */
     uint32_t iosb, event, apc, apc_ctx;
     NcThread *thread;
     uint32_t thread_id;      /* its id then: the slot may hold another thread by the end */
@@ -659,7 +709,27 @@ static struct {
     unsigned ndone;
     unsigned busy;           /* queued, reading or done: at most DISC_JOBS */
     bool started;
+    bool hurry;              /* a savestate's drain: no drive time left to wait (atomic) */
 } g_reader = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER};
+
+static uint64_t mono_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+}
+
+/* A request's drive time, until due (mono_ns), in slices a savestate's drain
+ * cuts short: the guest stands still then, and sees the read land as it goes
+ * on. The next request waits for it too, as the drive's. */
+static void drive_wait(uint64_t due)
+{
+    for (uint64_t now; !__atomic_load_n(&g_reader.hurry, __ATOMIC_ACQUIRE) && (now = mono_ns()) < due;) {
+        const uint64_t left = due - now;
+        const struct timespec ts = {0, (long)(left < 1000000 ? left : 1000000)};
+        nanosleep(&ts, NULL);
+    }
+}
 
 static void *reader_thread(void *arg)
 {
@@ -672,6 +742,7 @@ static void *reader_thread(void *arg)
         g_reader.head = (g_reader.head + 1) % DISC_JOBS;
         g_reader.n--;
         pthread_mutex_unlock(&g_reader.mu);
+        const uint64_t due = mono_ns() + (uint64_t)j.dev_us * 1000;
         if (j.gpu && nc_vm_dma.wait) {
             nc_vm_dma.wait(j.gpu);
         }
@@ -685,6 +756,9 @@ static void *reader_thread(void *arg)
             o += g->len;
         }
         j.err = j.ok ? 0 : errno;
+        if (j.dev_us) {
+            drive_wait(due);
+        }
         pthread_mutex_lock(&g_reader.mu);
         g_reader.done[g_reader.ndone++] = j;
         pthread_mutex_unlock(&g_reader.mu);
@@ -710,8 +784,9 @@ static void pin_buffer(NcKernel *k, uint32_t va, uint32_t n, int lock)
 
 /* Queues a read of n bytes at off into the buffer a[5] (resident and
  * writable); false when it must happen in place. sync: the calling thread
- * waits for it, every other one runs on. */
-static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, uint64_t off, uint32_t n, bool sync)
+ * waits for it, every other one runs on. dev_us: the drive's time for it. */
+static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, uint64_t off, uint32_t n, bool sync,
+                            uint32_t dev_us)
 {
     static int in_place = -1; /* NC_DISC_SYNC: every disc read in place, as before */
     if (in_place < 0) {
@@ -733,8 +808,8 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, ui
             event = fo + NC_FO_EVENT;
         }
     }
-    DiscJob j = {.disc = k->disc, .file = nf->disc, .fd = -1, .off = off, .va = a[5], .n = n, .iosb = a[4],
-                 .event = event, .apc = a[2], .apc_ctx = a[3], .thread = k->current,
+    DiscJob j = {.disc = k->disc, .file = nf->disc, .fd = -1, .off = off, .va = a[5], .n = n, .dev_us = dev_us,
+                 .iosb = a[4], .event = event, .apc = a[2], .apc_ctx = a[3], .thread = k->current,
                  .thread_id = k->current ? k->current->id : 0, .sync = sync};
     snprintf(j.path, sizeof(j.path), "%s", nf->path);
     j.seg = malloc(sizeof(*j.seg) * ((n + NC_PAGE - 1) / NC_PAGE + 1));
@@ -1253,6 +1328,24 @@ static bool disc_cached(const NcFile *nf, uint64_t off, uint32_t len)
     return nf->kind == F_DISC && ((off | len) & (DISC_SECTOR - 1));
 }
 
+/* Console timing: the file system's cache holds the n bytes at off (the
+ * pages the file's last drive read brought in). */
+static bool fs_cache_holds(const NcFile *nf, uint64_t off, uint32_t n)
+{
+    const struct FsCache *c = &g_fs_cache[nf - g_files];
+    return off >= c->lo && off + n <= c->hi;
+}
+
+/* A drive read of the n bytes at off brings their pages into the cache, in
+ * place of the file's last ones: the bytes the drive transfers. */
+static uint32_t fs_cache_fill(const NcFile *nf, uint64_t off, uint32_t n)
+{
+    struct FsCache *c = &g_fs_cache[nf - g_files];
+    c->lo = off & ~(uint64_t)(FS_PAGE - 1);
+    c->hi = (off + n + FS_PAGE - 1) & ~(uint64_t)(FS_PAGE - 1);
+    return (uint32_t)(c->hi - c->lo);
+}
+
 /* A synchronous read this long goes to the reader thread too, the calling
  * thread waiting for it (XAPI's ReadFile on an ordinary handle): in place,
  * every guest thread, the vblank DPC and the interrupts stopped for the
@@ -1320,9 +1413,12 @@ static uint64_t NtReadFile(NcKernel *k, NcFrame *f, const uint32_t *a)
         if (!nc_kernel_resident(k, a[5], n, true)) {
             return 0;
         }
-        const bool later = async || (n >= SYNC_LATER_MIN && can_block(k));
+        /* console timing: a synchronous read the cache doesn't hold waits for the drive */
+        const bool drive = g_devtime && !async && can_block(k) && !fs_cache_holds(nf, off, n);
+        const bool later = async || drive || (n >= SYNC_LATER_MIN && can_block(k));
+        const uint32_t dev_us = async ? device_us(nf, n) : drive ? device_us(nf, fs_cache_fill(nf, off, n)) : 0;
         if ((nf->kind == F_DISC || (nf->kind == F_HOST && nf->fd >= 0)) && later &&
-            disc_read_later(k, nf, a, off, n, !async)) {
+            disc_read_later(k, nf, a, off, n, !async, dev_us)) {
             nf->pos = off + n;
             if (g_trace_io) {
                 nc_log("hakuX-native-io", "read %s +%llx %u into %08x %s%s%s", nf->path, (unsigned long long)off,
@@ -2520,7 +2616,8 @@ const char *nc_io_state_drain(NcKernel *k, uint64_t timeout_ns)
         }
     }
     /* the reads in flight land, and the kernel completes them (the host's
-     * clock: the guest's stands still) */
+     * clock: the guest's stands still), the drive's time not waited out */
+    __atomic_store_n(&g_reader.hurry, true, __ATOMIC_RELEASE);
     for (uint64_t waited = 0;; waited += 1000000) {
         pthread_mutex_lock(&g_reader.mu);
         const bool idle = g_reader.busy == g_reader.ndone;
@@ -2529,10 +2626,12 @@ const char *nc_io_state_drain(NcKernel *k, uint64_t timeout_ns)
             break;
         }
         if (waited > timeout_ns) {
+            __atomic_store_n(&g_reader.hurry, false, __ATOMIC_RELEASE);
             return "a disc read did not finish";
         }
         usleep(1000);
     }
+    __atomic_store_n(&g_reader.hurry, false, __ATOMIC_RELEASE);
     nc_irq_post_work();
     nc_io_poll(k);
     return NULL;
@@ -2576,6 +2675,7 @@ bool nc_file_state_load(NcRd *r, unsigned v)
     for (unsigned i = 0; i < MAX_FILES; i++) {
         file_drop(&g_files[i]);
     }
+    memset(g_fs_cache, 0, sizeof(g_fs_cache));
     memset(g_links, 0, sizeof(g_links));
     nc_recs_get(r, &nc_rec_NcLink, g_links, sizeof(g_links[0]), MAX_LINKS, v);
     bool ok = !r->fail && st.nfiles <= MAX_FILES;

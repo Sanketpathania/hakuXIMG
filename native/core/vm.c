@@ -128,6 +128,8 @@ bool nc_vm_map(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len)
 }
 
 void (*nc_vm_write_hook)(uint32_t va, uint32_t len);
+void (*nc_vm_read_hook)(uint32_t va, uint32_t len);
+void (*nc_vm_free_hook)(uint32_t pa, uint32_t len);
 NcVmDma nc_vm_dma;
 
 /* Pages [page, page + n)'s guest views (the contiguous and GPU windows, the
@@ -337,6 +339,9 @@ void nc_vm_free_phys(NcVm *vm, uint32_t pa, uint32_t len)
         }
         memset(vm->page_used + pa / NC_PAGE, 0, pages);
         memset(vm->pin + pa / NC_PAGE, 0, pages);
+        if (nc_vm_free_hook) {
+            nc_vm_free_hook(pa, pages * NC_PAGE);
+        }
     }
 }
 

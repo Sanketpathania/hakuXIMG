@@ -68,8 +68,10 @@ void hle_pbd_counts(uint64_t *clears, uint64_t *swaps, unsigned *objects,
                     uint64_t *rt_uploads);
 /* draws: all of them; ff: of those, fixed function */
 /* Before a 2D blit writes guest memory: what the CPU wrote to the render
- * targets at sbase / dbase goes into their images first. */
-void hle_pbd_blit_begin(uint32_t sbase, uint32_t dbase);
+ * targets at sbase / dbase goes into their images first, and the images of
+ * swizzled targets over [sbase, send) and [dbase, dend) into their memory
+ * (which the blit copies as bytes). */
+void hle_pbd_blit_begin(uint32_t sbase, uint32_t send, uint32_t dbase, uint32_t dend);
 /* A 2D blit the decoder did in guest memory (surfaces at sbase / dbase, pitches
  * sp / dp, bpp bytes a pixel; w x h from (ix, iy) to (ox, oy)): the back end's
  * images follow (from a render target the GPU copies, into one it uploads). */

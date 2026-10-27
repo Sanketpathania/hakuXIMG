@@ -26,10 +26,59 @@
 
 static NcVm *g_vm;
 
+/* A page without access, given it back the way a guest access's fault does
+ * (hle_mem_stale_access: the image newer than its memory goes in first). A
+ * page several ranges share takes one call each; a guard drawn into again
+ * during its fill keeps its page closed, so a few more. */
+static void stale_open(uint32_t pa)
+{
+    for (unsigned k = 0; k < 16 && nc_vm_noaccess_has(g_vm, pa); k++) {
+        hle_mem_stale_access(pa);
+    }
+}
+
+/* Host code about to read [va, va + len) through a system call (a page
+ * without access fails it with EFAULT rather than faulting). */
+static void va_load(uint32_t va, uint32_t len)
+{
+    if (!g_vm) {
+        return;
+    }
+    for (uint32_t a = va & ~(NC_PAGE - 1); a < va + len; a += NC_PAGE) {
+        const uint32_t pa = nc_vm_phys(g_vm, a);
+        if (pa < g_vm->ram_size) {
+            stale_open(pa);
+        }
+    }
+}
+
+/* Memory the host or a device wrote through the RAM view (no fault: it
+ * isn't the guest's view), or freed: newer than an image guarded over it,
+ * which no fill may land over it now. The fill's own landing comes here too,
+ * and drops its guard. */
+static void unguard_written(uint32_t pa, uint32_t len)
+{
+    for (uint32_t p = pa & ~(NC_PAGE - 1); p < pa + len && p < g_vm->ram_size; p += NC_PAGE) {
+        if (nc_vm_noaccess_has(g_vm, p)) {
+            hle_barrier_unguard_range(pa, len);
+            return;
+        }
+    }
+}
+
+static void freed(uint32_t pa, uint32_t len)
+{
+    if (g_vm) {
+        unguard_written(pa, len);
+    }
+}
+
 void nc_hle_dirty_init(NcVm *vm)
 {
     g_vm = vm; /* every page starts dirty (unprotected) */
     nc_vm_write_hook = hle_va_store;
+    nc_vm_read_hook = va_load;
+    nc_vm_free_hook = freed;
     /* overlapped file reads: the reader waits for the GPU, not the guest */
     nc_vm_dma = (NcVmDma){hle_mem_write_fence, hle_mem_wait_fence, hle_host_mem_set_dirty};
 }
@@ -143,6 +192,7 @@ void hle_host_mem_set_dirty(uint32_t pa, uint32_t len)
         return;
     }
     hle_mem_host_wrote(pa, len);        /* its cache lines, before the GPU reads them */
+    unguard_written(pa, len);
     protect_runs(pa, len, false);
 }
 
@@ -253,15 +303,13 @@ void hle_va_store(uint32_t va, uint32_t len)
         if (pa == UINT32_MAX || pa >= g_vm->ram_size) {
             continue;
         }
-        if (nc_vm_noaccess_has(g_vm, pa)) {
-            /* a page without access (barrier.c: a frame buffer whose image is
-             * newer, a report page): what a guest access's fault does, as a
-             * host write into it fails instead (EFAULT). Halo 2 streams
-             * bitmaps from its map cache into an old frame buffer's memory;
-             * the reads failed and its scope reticle sampled the frame
-             * buffer's leftover bytes. */
-            hle_mem_stale_access(pa);
-        }
+        /* a page without access (barrier.c: a frame buffer or target whose
+         * image is newer, a report page): what a guest access's fault does,
+         * as a host write into it fails instead (EFAULT). Halo 2 streams
+         * bitmaps from its map cache into an old frame buffer's memory; the
+         * reads failed and its scope reticle sampled the frame buffer's
+         * leftover bytes. */
+        stale_open(pa);
         if (g_vm->wp[pa / NC_PAGE] == NC_WP_CLEAN) {
             first_write(pa, len);
         } else if (g_vm->wp[pa / NC_PAGE] == NC_WP_WRITTEN) {

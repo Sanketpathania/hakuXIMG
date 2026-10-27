@@ -226,12 +226,18 @@ static void stale_unlock(void)
  * frame buffers are protected after its first two swaps and no swap changes
  * any; a touch of one no longer on screen just gives its access back (no
  * copy: a back buffer's memory as before, Bink movies drawn into it on the
- * CPU), so a title that does that pays a fault and one change a frame. */
+ * CPU), so a title that does that pays a fault and one change a frame.
+ * hle_barrier_guard's ranges share the table, each with its fill. */
 #define STALE_RANGES 4
+#define GUARD_RANGES 128
 static struct {
     uint32_t pa, len;
-} g_na[STALE_RANGES];
+    void (*fill)(uint32_t pa, uint32_t len);    /* a guard's; NULL: a frame's */
+    uint32_t gen;                               /* a guard's: g_guard_gen at its last arming */
+} g_na[STALE_RANGES + GUARD_RANGES];
 static unsigned g_nna;
+static uint32_t g_guard_gen;                    /* (stale lock) */
+static uint32_t g_guard_drops = 1;              /* guards dropped (atomic): hle_barrier_guard_drops */
 
 static int na_find(uint32_t pa, uint32_t len)
 {
@@ -243,10 +249,60 @@ static int na_find(uint32_t pa, uint32_t len)
     return -1;
 }
 
+/* The frame's (guards: false) or the guard's (true) range [pa, pa + len) */
+static int na_find_kind(uint32_t pa, uint32_t len, bool guard)
+{
+    for (unsigned i = 0; i < g_nna; i++) {
+        if (g_na[i].pa == pa && g_na[i].len == len && !g_na[i].fill == !guard) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
 static void na_drop(unsigned i)
 {
+    const uint32_t lo = g_na[i].pa & ~4095u, hi = (g_na[i].pa + g_na[i].len + 4095) & ~4095u;
+    if (g_na[i].fill) {
+        __atomic_add_fetch(&g_guard_drops, 1, __ATOMIC_RELEASE);
+    }
     hle_host_mem_noaccess(g_na[i].pa, g_na[i].len, false);
     g_na[i] = g_na[--g_nna];
+    /* a page it shared with another range (small targets side by side)
+     * stays without access for that one */
+    for (unsigned j = 0; j < g_nna; j++) {
+        const uint32_t jl = MAX(g_na[j].pa & ~4095u, lo);
+        const uint32_t jh = MIN((g_na[j].pa + g_na[j].len + 4095) & ~4095u, hi);
+        if (jl < jh) {
+            hle_host_mem_noaccess(jl, jh - jl, true);
+        }
+    }
+}
+
+/* A guard with bytes on pa's page: a target rarely starts and ends on a page,
+ * and the guest's access to the other data on its edge pages comes first as
+ * often as not (its bytes there would be read stale after) */
+static int na_find_guard_page(uint32_t pa)
+{
+    for (unsigned i = 0; i < g_nna; i++) {
+        const uint32_t lo = g_na[i].pa & ~4095u, hi = (g_na[i].pa + g_na[i].len + 4095) & ~4095u;
+        if (g_na[i].fill && pa >= lo && pa < hi) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* The first of the table's frames (fill NULL) or guards, and how many */
+static unsigned na_count(bool guards, unsigned *first)
+{
+    unsigned n = 0;
+    for (unsigned i = 0; i < g_nna; i++) {
+        if (!g_na[i].fill == !guards && !n++) {
+            *first = i;
+        }
+    }
+    return n;
 }
 
 void hle_barrier_set_stale(uint32_t pa, uint32_t len, void (*fill)(uint32_t pa, uint32_t len))
@@ -260,16 +316,67 @@ void hle_barrier_set_stale(uint32_t pa, uint32_t len, void (*fill)(uint32_t pa, 
         while (g_nna) {                     /* the mode stops: every range's access back */
             na_drop(g_nna - 1);
         }
-    } else if (nst && na_find(pa, len) < 0) {
-        if (g_nna == STALE_RANGES) {
-            na_drop(0);                     /* the oldest, if no other room */
+    } else if (nst && na_find_kind(pa, len, false) < 0) {
+        unsigned first = 0;
+        if (na_count(false, &first) == STALE_RANGES) {
+            na_drop(first);                 /* the oldest, if no other room */
         }
         hle_host_mem_noaccess(pa, len, true);
         g_na[g_nna].pa = pa;
-        g_na[g_nna++].len = len;
+        g_na[g_nna].len = len;
+        g_na[g_nna++].fill = NULL;
     }
     __atomic_store_n(&g_stale, nst, __ATOMIC_RELEASE);
     stale_unlock();
+}
+
+void hle_barrier_guard(uint32_t pa, uint32_t len, void (*fill)(uint32_t pa, uint32_t len))
+{
+    if (!len || !fill || (uint64_t)pa + len > g_ram) {
+        return;
+    }
+    stale_lock();
+    const int i = na_find_kind(pa, len, true);
+    if (i >= 0) {
+        g_na[i].gen = ++g_guard_gen;        /* drawn again: a fill under way leaves it */
+    } else {
+        unsigned first = 0;
+        if (na_count(true, &first) == GUARD_RANGES) {
+            na_drop(first);
+        }
+        hle_host_mem_noaccess(pa, len, true);
+        g_na[g_nna].pa = pa;
+        g_na[g_nna].len = len;
+        g_na[g_nna].gen = ++g_guard_gen;
+        g_na[g_nna++].fill = fill;
+    }
+    stale_unlock();
+}
+
+void hle_barrier_unguard(uint32_t pa, uint32_t len)
+{
+    stale_lock();
+    const int i = na_find_kind(pa, len, true);
+    if (i >= 0) {
+        na_drop((unsigned)i);
+    }
+    stale_unlock();
+}
+
+void hle_barrier_unguard_range(uint32_t pa, uint32_t len)
+{
+    stale_lock();
+    for (unsigned i = g_nna; i-- > 0;) {
+        if (g_na[i].fill && g_na[i].pa < pa + len && pa < g_na[i].pa + g_na[i].len) {
+            na_drop(i);
+        }
+    }
+    stale_unlock();
+}
+
+uint32_t hle_barrier_guard_drops(void)
+{
+    return __atomic_load_n(&g_guard_drops, __ATOMIC_ACQUIRE);
 }
 
 /* ---- visibility-test reports (barrier.h hle_barrier_report_pushed) ----
@@ -513,7 +620,10 @@ void hle_mem_stale_access(uint32_t pa)
         return;
     }
     stale_lock();
-    const int i = na_find(pa, 0);
+    int i = na_find(pa, 0);
+    if (i < 0) {
+        i = na_find_guard_page(pa);
+    }
     if (i < 0) {
         /* a page left without access by a range dropped meanwhile */
         hle_host_mem_noaccess(pa & ~4095u, 4096, false);
@@ -521,6 +631,24 @@ void hle_mem_stale_access(uint32_t pa)
         return;
     }
     const uint32_t lo = g_na[i].pa, len = g_na[i].len;
+    void (*fill)(uint32_t pa, uint32_t len) = g_na[i].fill;
+    if (fill) {
+        /* a guard: the image goes in, then the access comes back, unless the
+         * range was drawn into again meanwhile (its gen, unique to an arming).
+         * The image's landing drops the guard itself (a host write over a
+         * guard: hle_barrier_unguard_range); this drop is for a fill that
+         * found nothing newer to land. */
+        const uint32_t gen = g_na[i].gen;
+        stale_unlock();
+        fill(lo, len);
+        stale_lock();
+        const int j = na_find_kind(lo, len, true);
+        if (j >= 0 && g_na[j].gen == gen) {
+            na_drop((unsigned)j);
+        }
+        stale_unlock();
+        return;
+    }
     na_drop((unsigned)i);
     const uint64_t st = __atomic_load_n(&g_stale, __ATOMIC_ACQUIRE);
     const bool shown = st == ((uint64_t)lo << 32 | len);

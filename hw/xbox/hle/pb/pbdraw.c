@@ -111,6 +111,12 @@ typedef struct PbObj {
                                            title's data: superseded while written <= it */
     uint64_t bind_hash;                 /* swizzled: its memory sampled at its last bind
                                            (mem_sample_hash; the GPU's draws don't land there) */
+    /* swizzled colour targets: their images into memory (swz_*) */
+    uint64_t landed;                    /* written when its image last went into memory */
+    uint32_t guard_drops;               /* hle_barrier_guard_drops() at its last guarding */
+    uint64_t fault_window, fault_swap;  /* its guest faults: the window's first swap, the last's */
+    uint32_t fault_frames;              /* ... the frames in the window with one */
+    uint64_t cool_until;                /* unguarded until this swap */
 } PbObj;
 
 /* A texture the stage registers described: the back end's image of it,
@@ -527,6 +533,7 @@ static void linear_size(uint32_t pitch, uint32_t xfmt, uint32_t sx, uint32_t sy,
 }
 
 static void obj_edges_set(PbObj *o);
+static void swz_forget(const PbObj *o);
 
 /* After a savestate's load (hle_pbd_restored): a linear colour target made
  * before this many swaps takes its pixels from guest memory, where the save
@@ -610,6 +617,7 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
             }
             return 0;
         }
+        swz_forget(o);
         HleCmdObjDestroy *x = begin(HLE_OP_OBJ_DESTROY, sizeof(*x));
         x->after = 0;
         x->id = o->id;
@@ -974,6 +982,8 @@ static void mode_sync(void)
     g_pd.disp_h = h;
 }
 
+static void swz_drawn(PbObj *o);
+
 /* The targets the surface methods describe, bound when they changed. */
 static void sync_rt(void)
 {
@@ -1049,6 +1059,9 @@ static void sync_rt(void)
         g_pd.rt_obj = obj_of(rt);
         g_pd.ds_obj = obj_of(ds);
         g_pd.ds = ds;
+        if (g_pd.rt_obj) {
+            g_pd.rt_obj->guard_drops = 0;   /* its memory judged again at its next draw */
+        }
         if (g_pd.rt_obj && !g_pd.rt_obj->d.pitch) {
             const HleFmtInfo *rfi = hle_fmt_info(g_pd.rt_obj->d.xfmt);
             g_pd.rt_obj->bind_hash = rfi ? mem_sample_hash(g_pd.rt_obj->d.pa, g_pd.rt_obj->d.w * g_pd.rt_obj->d.h *
@@ -1157,6 +1170,7 @@ static void clear(uint32_t flags)
     hle_fe_commit();
     if (g_pd.rt_obj && (c->flags & HLE_CLEAR_TARGET)) {
         g_pd.rt_obj->written = ++g_pd.wseq;
+        swz_drawn(g_pd.rt_obj);
     }
     if (c->flags & (HLE_CLEAR_ZBUFFER | HLE_CLEAR_STENCIL)) {
         ds_written();
@@ -1936,13 +1950,20 @@ static const HleSurfDesc *object_desc(uint32_t id)
     return NULL;
 }
 
-void hle_pbd_blit_begin(uint32_t sbase, uint32_t dbase)
+static unsigned swz_to_memory(uint32_t pa, uint32_t end);
+
+void hle_pbd_blit_begin(uint32_t sbase, uint32_t send, uint32_t dbase, uint32_t dend)
 {
     if (!g_pd.on || !g_pd.device) {
         return;
     }
     rt_cpu_sync(object_at(sbase));
     rt_cpu_sync(object_at(dbase));
+    /* the 2D engine copies memory: a swizzled target's image goes there
+     * first, the source's and the destination's (under the bytes the blit
+     * leaves) */
+    swz_to_memory(sbase, send);
+    swz_to_memory(dbase, dend);
 }
 
 void hle_pbd_blit(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t dp, uint32_t bpp,
@@ -1955,6 +1976,34 @@ void hle_pbd_blit(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t dp, uint
     if (g_dlog_left > 0) {
         hle_log("hakuX-hle-pb", "blit %08x/%u -> %08x/%u bpp %u %ux%u from %u,%u to %u,%u objects %u -> %u",
                 sbase, sp, dbase, dp, bpp, w, h, ix, iy, ox, oy, src, dst);
+    }
+    /* A swizzled target's memory is a block of bytes to the 2D engine, its
+     * pixels not where the blit's rows say: the copy is memory's
+     * (hle_pbd_blit_begin put the image there), not an image copy. D3D's
+     * CopyRects on swizzled surfaces does that: Morrowind copies its
+     * inventory's character out of its target (cleared red) and back,
+     * keying the red out on the CPU in between; as image copies, the
+     * character came back on red, a black band over its head (the copy's
+     * 4096 x 64 rows into the 256 x 256 target). Into a swizzled target
+     * from memory, the memory is newer than the images over it, the target
+     * and any linear view of the same memory (Morrowind clears the target
+     * through one): superseded until drawn again, textures over it read the
+     * memory. */
+    PbObj *so = src ? obj_of(src) : NULL, *sd_obj = dst ? obj_of(dst) : NULL;
+    if (so && !so->d.pitch) {
+        src = 0;
+    }
+    if (!src && sd_obj && !sd_obj->d.pitch) {
+        const uint32_t end = dbase + (oy + h - 1) * dp + (ox + w) * bpp;
+        for (unsigned i = 0; i < g_pd.nobjs; i++) {
+            PbObj *o = &g_pd.objs[i];
+            const HleFmtInfo *fi = o->id && !o->cube ? hle_fmt_info(o->d.xfmt) : NULL;
+            const uint32_t olen = !fi ? 0 : o->d.pitch ? o->d.pitch * o->d.h : o->d.w * o->d.h * (fi->bpp / 8);
+            if (olen && !(fi->flags & HLE_FI_DEPTH) && o->d.pa < end && o->d.pa + olen > dbase) {
+                o->mem_seq = MAX(g_pd.wseq, 1);   /* drawn into again: written passes it */
+            }
+        }
+        return;
     }
     if (src) {
         /* from a render target: the GPU's copy, into an image of the
@@ -1986,6 +2035,7 @@ void hle_pbd_blit(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t dp, uint
         }
         if (dd) {
             dd->written = ++g_pd.wseq;
+            swz_drawn(dd);
         }
     } else if (dst) {
         /* into a render target from memory: its rows, as copied, uploaded */
@@ -2389,9 +2439,12 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
      * into it as colour, the picture was the clear colour (teal). */
     const bool dxt = fi && (fi->flags & HLE_FI_DXT);
     PbObj *best = NULL;
+    /* nor one whose memory is newer than its image (obj_superseded: a byte
+     * copy into it, hle_pbd_blit; a texture defined from it) */
     for (unsigned i = 0; !dxt && i < g_pd.nobjs; i++) {
         PbObj *o = &g_pd.objs[i];
-        const HleFmtInfo *oi = o->d.pa == pa && !o->cube ? hle_fmt_info(o->d.xfmt) : NULL;
+        const HleFmtInfo *oi = o->d.pa == pa && !o->cube && !obj_superseded(o) ? hle_fmt_info(o->d.xfmt)
+                                                                                : NULL;
         if (oi && !!(oi->flags & HLE_FI_DEPTH) == want_depth && (!best || o->bound > best->bound)) {
             best = o;
         }
@@ -2818,9 +2871,12 @@ static void front_fill(uint32_t pa, uint32_t len)
     }
 }
 
+static void swz_serve(void);
+
 void hle_pbd_front_serve(void)
 {
     t_decoder = true;
+    swz_serve();
     const uint32_t r = __atomic_load_n(&g_front.req, __ATOMIC_ACQUIRE);
     if (r == g_front.done) {
         return;
@@ -2897,6 +2953,7 @@ static void emit(HleCmdDraw *d)
     rt_first_write();
     if (g_pd.rt_obj) {
         g_pd.rt_obj->written = ++g_pd.wseq;
+        swz_drawn(g_pd.rt_obj);
     }
     if (g_pd.ds && ((R(0x030C) && R(0x035C)) || (R(0x032C) && (R(0x0360) & 0xFF)))) {
         ds_written();                   /* depth test and writes, or stencil writes */
@@ -3677,6 +3734,7 @@ static unsigned swz_land(void)
         PbObj *o = obj_of(g_swz[i].id);
         if (o) {
             o->bind_hash = mem_sample_hash(g_swz[i].pa, g_swz[i].len);  /* the memory is its image now */
+            o->landed = o->written;
         }
         n++;
     }
@@ -3698,47 +3756,230 @@ static bool newer_over(const PbObj *o, uint32_t len)
     return false;
 }
 
+/* o a swizzled colour target (render-to-texture, pitch 0): its image's
+ * bytes in memory, and a texel's */
+static bool swz_target(const PbObj *o, uint32_t *len, uint32_t *bpp)
+{
+    const HleFmtInfo *fi = o->id && !o->cube && !o->d.pitch ? hle_fmt_info(o->d.xfmt) : NULL;
+    if (!fi || !(fi->flags & HLE_FI_SWZ) || (fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) || fi->bpp < 8) {
+        return false;
+    }
+    *bpp = fi->bpp / 8;
+    *len = o->d.w * o->d.h * *bpp;
+    return true;
+}
+
+/* The title's data in o's memory now: a texture took the memory, another
+ * target was drawn over it, or the title wrote it since the bind. */
+static bool swz_reused(const PbObj *o, uint32_t len)
+{
+    return obj_superseded(o) || newer_over(o, len) || mem_sample_hash(o->d.pa, len) != o->bind_hash;
+}
+
+/* o's image read back into the arena for swz_land; false: no room (landed
+ * counts the copies a landing for room made). */
+static bool swz_readback(const PbObj *o, uint32_t len, uint32_t bpp, unsigned *landed)
+{
+    uint8_t *p = NULL;
+    uint32_t off = g_nswz < SWZ_PENDING ? arena(len, &p) : HLE_ARENA_FULL;
+    if (off == HLE_ARENA_FULL) {
+        *landed += swz_land();              /* room for the rest */
+        off = arena(len, &p);
+        if (off == HLE_ARENA_FULL) {
+            return false;
+        }
+    }
+    memcpy(p, k_swz_sentinel, MIN(len, (uint32_t)sizeof(k_swz_sentinel)));
+    HleCmdReadback *rb = begin(HLE_OP_READBACK, sizeof(*rb));
+    memset(rb, 0, sizeof(*rb));
+    rb->value = hle_fe_next_value();        /* an arena readback submits: a value of its own */
+    rb->surf = o->id;
+    rb->arena_off = off;
+    rb->w = o->d.w;
+    rb->h = o->d.h;
+    hle_fe_commit();
+    g_swz[g_nswz++] = (typeof(g_swz[0])){ o->id, o->d.pa, len, o->d.w, o->d.h, bpp, p };
+    return true;
+}
+
 static void park_swizzled(void)
 {
     unsigned n = 0, skipped = 0, reused = 0;
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         const PbObj *o = &g_pd.objs[i];
-        const HleFmtInfo *fi = o->id && !o->cube && !o->d.pitch ? hle_fmt_info(o->d.xfmt) : NULL;
-        if (!fi || !(fi->flags & HLE_FI_SWZ) || (fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) || fi->bpp < 8 ||
-            !o->written) {
+        uint32_t len, bpp;
+        if (!o->written || !swz_target(o, &len, &bpp)) {
             continue;
         }
-        const uint32_t bpp = fi->bpp / 8, len = o->d.w * o->d.h * bpp;
-        /* the title's data there now: a texture took the memory, another
-         * target was drawn over it, or the title wrote it since the bind */
-        if (obj_superseded(o) || newer_over(o, len) || mem_sample_hash(o->d.pa, len) != o->bind_hash) {
+        if (swz_reused(o, len)) {
             reused++;
             continue;
         }
-        uint8_t *p = NULL;
-        uint32_t off = g_nswz < SWZ_PENDING ? arena(len, &p) : HLE_ARENA_FULL;
-        if (off == HLE_ARENA_FULL) {
-            n += swz_land();                /* room for the rest */
-            off = arena(len, &p);
-            if (off == HLE_ARENA_FULL) {
-                skipped++;
-                continue;
-            }
+        if (!swz_readback(o, len, bpp, &n)) {
+            skipped++;
         }
-        memcpy(p, k_swz_sentinel, MIN(len, (uint32_t)sizeof(k_swz_sentinel)));
-        HleCmdReadback *rb = begin(HLE_OP_READBACK, sizeof(*rb));
-        memset(rb, 0, sizeof(*rb));
-        rb->value = hle_fe_next_value();    /* an arena readback submits: a value of its own */
-        rb->surf = o->id;
-        rb->arena_off = off;
-        rb->w = o->d.w;
-        rb->h = o->d.h;
-        hle_fe_commit();
-        g_swz[g_nswz++] = (typeof(g_swz[0])){ o->id, o->d.pa, len, o->d.w, o->d.h, bpp, p };
     }
     n += swz_land();
     hle_log("hakuX-hle-pb", "savestate: %u swizzled surfaces written back, %u whose memory the title reused kept%s",
             n, reused, skipped ? " (some skipped: arena full)" : "");
+}
+
+/* ---- swizzled targets the CPU reads ----
+ * The NV2A draws into memory; here a target's draws land in its image, and
+ * its memory keeps what it held. A swizzled colour target is guarded at a
+ * draw, clear or copy into it (mem/barrier.c hle_barrier_guard): its pages
+ * lose guest access, and the guest's first access has its image swizzled
+ * into them first (swz_fill on the guest's thread, swz_serve at the decode
+ * thread's next pass), as the console's memory holds it once the GPU passed
+ * the fence the guest waited for. Fable draws its hero's head and skin into
+ * a 256 x 256 R5G6B5 target as the hero loads, a dozen layered composites in
+ * a row without leaving it, and compresses that memory into the DXT1
+ * textures the model wears after each: from memory the GPU never wrote, the
+ * face and arms were black after a boot, or the noise of an older image
+ * there. A 2D blit copies such memory too (hle_pbd_blit_begin lands it).
+ *
+ * The guard stays while nothing touches the memory: a target only the GPU
+ * reads changes its pages' access once. Memory the host or a device writes,
+ * or frees, drops it without a copy (native/hle/dirty.c), as does memory the
+ * title wrote since the bind (its data then, not the image). Each copy
+ * costs the decoder a wait for the GPU: a target the guest touches in
+ * SWZ_HOT of SWZ_WINDOW frames (data on its edge pages, a buffer aliased
+ * over it) goes unguarded for SWZ_COOL frames. */
+#define SWZ_WINDOW 120
+#define SWZ_HOT 30
+#define SWZ_COOL 1800
+
+/* swz_fill's request: the guest's thread asks, the decode thread takes it at
+ * its next pass and copies; a request not taken in 250 ms is withdrawn (the
+ * access goes ahead on older memory), one taken is waited for */
+enum { FILL_IDLE, FILL_ASKED, FILL_TAKEN, FILL_DONE, FILL_GONE };
+static struct {
+    uint32_t pa, len;
+    int state;                              /* FILL_* (atomic) */
+    int busy;                               /* a guest thread's request in flight */
+} g_fill;
+
+static void swz_fill(uint32_t pa, uint32_t len)
+{
+    if (t_decoder) {
+        return;                             /* it can't wait for itself */
+    }
+    while (__atomic_exchange_n(&g_fill.busy, 1, __ATOMIC_ACQUIRE)) {
+        g_usleep(100);
+    }
+    g_fill.pa = pa;
+    g_fill.len = len;
+    __atomic_store_n(&g_fill.state, FILL_ASKED, __ATOMIC_RELEASE);
+    const int64_t t0 = hle_now_ns();
+    for (;;) {
+        int s = __atomic_load_n(&g_fill.state, __ATOMIC_ACQUIRE);
+        if (s == FILL_DONE) {
+            break;
+        }
+        if (s == FILL_ASKED && hle_now_ns() - t0 > 250000000 &&
+            __atomic_compare_exchange_n(&g_fill.state, &s, FILL_GONE, false, __ATOMIC_ACQ_REL,
+                                        __ATOMIC_ACQUIRE)) {
+            hle_log("hakuX-hle-pb", "swizzled target %08x: the decoder did not take its copy in 250 ms "
+                    "(the guest reads older memory)", pa);
+            break;
+        }
+        hle_pb_kick();
+        g_usleep(200);
+    }
+    __atomic_store_n(&g_fill.state, FILL_IDLE, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_fill.busy, 0, __ATOMIC_RELEASE);
+}
+
+/* The swizzled colour targets over [pa, end) whose images are newer than
+ * their memory, into it (decode thread; waits for the GPU): how many. */
+static unsigned swz_to_memory(uint32_t pa, uint32_t end)
+{
+    unsigned n = 0;
+    for (unsigned i = 0; g_pd.on && g_pd.device && i < g_pd.nobjs && pa < end; i++) {
+        PbObj *o = &g_pd.objs[i];
+        uint32_t len, bpp;
+        if (!o->written || o->landed == o->written || !swz_target(o, &len, &bpp) || o->d.pa >= end ||
+            o->d.pa + len <= pa || swz_reused(o, len) || !swz_readback(o, len, bpp, &n)) {
+            continue;
+        }
+        static unsigned s_logged;
+        if (s_logged++ < 16) {
+            hle_log("hakuX-hle-pb", "swizzled target %u (%08x %ux%u format %02x): its image into memory "
+                    "(%08x+%u)", o->id, o->d.pa, o->d.w, o->d.h, o->d.xfmt, pa, end - pa);
+        }
+    }
+    return n + swz_land();
+}
+
+/* A guest fault on o's guard: o's account of the frames with one */
+static void swz_fault(PbObj *o, uint32_t len)
+{
+    if (g_pd.swaps - o->fault_window >= SWZ_WINDOW) {
+        o->fault_window = g_pd.swaps;
+        o->fault_frames = 0;
+    }
+    if (!o->fault_frames || o->fault_swap != g_pd.swaps) {
+        o->fault_frames++;
+        o->fault_swap = g_pd.swaps;
+    }
+    if (o->fault_frames >= SWZ_HOT) {
+        o->cool_until = g_pd.swaps + SWZ_COOL;
+        o->fault_frames = 0;
+        hle_barrier_unguard(o->d.pa, len);
+        hle_log("hakuX-hle-pb", "swizzled target %u (%08x %ux%u): the guest touches it in %u of %u frames: "
+                "unguarded for %u", o->id, o->d.pa, o->d.w, o->d.h, SWZ_HOT, SWZ_WINDOW, SWZ_COOL);
+    }
+}
+
+static void swz_serve(void)
+{
+    int s = FILL_ASKED;
+    if (__atomic_load_n(&g_fill.state, __ATOMIC_ACQUIRE) != FILL_ASKED ||
+        !__atomic_compare_exchange_n(&g_fill.state, &s, FILL_TAKEN, false, __ATOMIC_ACQ_REL,
+                                     __ATOMIC_ACQUIRE)) {
+        return;
+    }
+    const uint32_t pa = g_fill.pa, len = g_fill.len;
+    for (unsigned i = 0; g_pd.on && i < g_pd.nobjs; i++) {
+        PbObj *o = &g_pd.objs[i];
+        uint32_t olen, bpp;
+        if (o->d.pa == pa && swz_target(o, &olen, &bpp) && olen == len) {
+            swz_fault(o, len);
+        }
+    }
+    swz_to_memory(pa, pa + len);
+    __atomic_store_n(&g_fill.state, FILL_DONE, __ATOMIC_RELEASE);
+}
+
+static void swz_drawn(PbObj *o)
+{
+    uint32_t len, bpp;
+    const uint32_t drops = hle_barrier_guard_drops();
+    if (o->guard_drops == drops || o->cool_until > g_pd.swaps) {
+        return;                             /* guarded since no guard went (or cooling) */
+    }
+    o->guard_drops = drops;
+    /* memory the title wrote since the bind is its data, not the image's */
+    if (swz_target(o, &len, &bpp) && mem_sample_hash(o->d.pa, len) == o->bind_hash) {
+        hle_barrier_guard(o->d.pa, len, swz_fill);
+    }
+}
+
+/* o's slot goes to another target: its guard too, unless one that stays
+ * shares it */
+static void swz_forget(const PbObj *o)
+{
+    uint32_t len, bpp, xl;
+    if (!swz_target(o, &len, &bpp)) {
+        return;
+    }
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        const PbObj *x = &g_pd.objs[i];
+        if (x != o && x->d.pa == o->d.pa && swz_target(x, &xl, &bpp) && xl == len) {
+            return;
+        }
+    }
+    hle_barrier_unguard(o->d.pa, len);
 }
 
 void hle_pbd_park(void)
@@ -3759,6 +4000,9 @@ void hle_pbd_restored(void)
 {
     g_restored_until = g_pd.swaps + 120;
     g_restored_display = true;
+    /* the loaded memory is newer than any image: no fill over it (the frame
+     * on screen is guarded again at its swap, a target at its next draw) */
+    hle_barrier_set_stale(0, 0, NULL);
 }
 
 _Static_assert(sizeof(((HlePbdState *)0)->pmem) == sizeof(g_pd.pmem), "pmem");

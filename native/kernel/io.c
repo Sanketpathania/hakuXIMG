@@ -1519,6 +1519,7 @@ static uint64_t NtWriteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
     if (nf->kind == F_VOLUME) {
         if (nf->partition == 0) {
             const uint64_t off = io_offset(k, nf, a[7]);
+            nc_vm_will_read(a[5], a[6]);
             raw_io(0, off, nc_vm_host(k->vm, a[5]), a[6], true);
             nf->pos = off + a[6];
             if (g_trace_io) {
@@ -1532,6 +1533,7 @@ static uint64_t NtWriteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
          * write empties the folder; the head of the partition is kept. */
         const uint64_t o = io_offset(k, nf, a[7]);
         nf->pos = o + a[6];
+        nc_vm_will_read(a[5], a[6]);
         raw_io(partition_root(nf), o, nc_vm_host(k->vm, a[5]), a[6], true);
         /* The FATX superblock: "FATX", volume id, sectors per cluster. */
         const uint8_t *sb = nc_vm_host(k->vm, a[5]);
@@ -1563,6 +1565,7 @@ static uint64_t NtWriteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
             regrow(nf, size, off); /* the gap a write past the end leaves */
         }
     }
+    nc_vm_will_read(a[5], a[6]);   /* pwrite from a page without access fails rather than faults */
     ssize_t n = pwrite(nf->fd, nc_vm_host(k->vm, a[5]), a[6], (off_t)off);
     uint32_t st = n == (ssize_t)a[6] ? NC_STATUS_SUCCESS : 0xC000007Fu; /* STATUS_DISK_FULL */
     nf->wrote |= n > 0;

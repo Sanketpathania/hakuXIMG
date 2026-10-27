@@ -513,7 +513,9 @@ static void blit(const uint32_t *r)
         g_pb.copies_skipped++;
         return;
     }
-    hle_pbd_blit_begin(sbase, dbase);       /* the CPU's writes before the blit's */
+    /* the CPU's writes before the blit's; images newer than memory into it */
+    hle_pbd_blit_begin(sbase, sbase + (iy + h - 1) * sp + (ix + w) * bpp, dbase,
+                       dbase + (oy + h - 1) * dp + (ox + w) * bpp);
     for (uint32_t y = 0; y < h; y++) {
         const uint32_t so = sbase + (iy + y) * sp + ix * bpp, d = dbase + (oy + y) * dp + ox * bpp;
         uint8_t *sr = hle_pa_ptr(so, row), *dr = hle_pa_ptr(d, row);

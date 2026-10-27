@@ -27,6 +27,22 @@ void hle_barrier_arm_landing(uint32_t pa, uint32_t len, uint64_t value);
  * hle_host_mem_noaccess), calls fill on the guest's thread, once, then waits
  * for what fill armed. One range at a time; len 0 drops it. */
 void hle_barrier_set_stale(uint32_t pa, uint32_t len, void (*fill)(uint32_t pa, uint32_t len));
+/* [pa, pa + len) is older than an image the GPU drew over it (push-buffer
+ * mode's swizzled targets): its pages lose guest access until the guest's
+ * first access to one, a read or a write, whose thread calls fill(pa, len)
+ * to put the image there and gives the pages their access back once it
+ * returns. Kept until touched; guarding a range guarded already (drawn
+ * into again) keeps it guarded past a fill under way.
+ * hle_barrier_set_stale(.., NULL) drops these too; hle_barrier_unguard one,
+ * without its fill (the image is going); hle_barrier_unguard_range every
+ * guard over [pa, pa + len), without fill: memory there written by the host
+ * or a device (newer than any image: the fill's own landing included) or
+ * freed. hle_barrier_guard_drops: a count of guards dropped, for a caller
+ * that keeps its own note of what it guarded. */
+void hle_barrier_guard(uint32_t pa, uint32_t len, void (*fill)(uint32_t pa, uint32_t len));
+void hle_barrier_unguard(uint32_t pa, uint32_t len);
+void hle_barrier_unguard_range(uint32_t pa, uint32_t len);
+uint32_t hle_barrier_guard_drops(void);
 /* The host, at a guest access to a page without access (hle_barrier_set_stale):
  * the fill, then the pages' access back. */
 void hle_mem_stale_access(uint32_t pa);

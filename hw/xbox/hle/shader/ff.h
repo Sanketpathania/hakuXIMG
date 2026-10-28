@@ -173,9 +173,9 @@ typedef struct HleFfPush {
     float zscale;                     /* vertex programs: 1 / depth maximum (2^-n for
                                          the integer formats: HLE_ZNORM_GLSL) */
     uint32_t fog_color;               /* FOGCOLOR (D3DCOLOR) */
-    float fog[4];                     /* FOGSTART, FOGEND, FOGDENSITY, then (bits) a
-                                         linear texture's own size, clamped to
-                                         (HLE_NVRECT_GLSL) */
+    float fog[4];                     /* FOGSTART, FOGEND, FOGDENSITY, then (bits) the
+                                         stage, size and address modes a linear
+                                         texture is kept inside (HLE_NVRECT_GLSL) */
     uint32_t psc[20];                 /* pixel shaders: C0[8], C1[8], final C0, C1
                                          (D3DCOLOR), W-buffer offset and slope */
     float scr[4];                     /* fixed function: D3D screen pixels = xy *

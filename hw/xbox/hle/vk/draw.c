@@ -2451,7 +2451,7 @@ static uint32_t lin_rect(const HleCmdDraw *c, const HleCmdState *s, unsigned st)
                           hle_surf_get(c->tex[st]) : NULL;
     const uint32_t r = c->tex_rect[st];
     uint32_t w = (r >> 16) & 0x1FFF, h = r & 0x1FFF;
-    if (!sf || !w || !h || (w >= sf->d.w && h >= sf->d.h)) {
+    if (!sf || !w || !h || !sf->d.w || !sf->d.h || (w >= sf->d.w && h >= sf->d.h)) {
         return 0;
     }
     w = MIN(w, sf->d.w);

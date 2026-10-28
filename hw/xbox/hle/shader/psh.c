@@ -278,7 +278,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     unsigned unsup = 0;
     /* PSDotMapping HILO_1 (4) in a stage's field: dmap reads the 32-bit texel
      * as two 16-bit halves, hi A:R and lo G:B, over 65535 (as xemu). Read as
-     * two signed bytes (R, G), the depth buffer Halo 2's fog pass reads as
+     * its R and G bytes mapped to -1..1, the depth buffer Halo 2's fog pass reads as
      * A8R8G8B8 (its top 16 bits in A:R) gave its fog-table lookup depth bits
      * 8-15, which wrap every 256 steps: stripes of fog and none across the
      * scenery, moving with the camera. */

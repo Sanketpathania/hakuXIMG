@@ -41,6 +41,7 @@ enum {
     TSS_COLORKEYOP, TSS_COLORSIGN, TSS_ALPHAKILL,
     TSS_BUMPENVMAT00 = 22,              /* .. 11, then LSCALE, LOFFSET */
     TSS_BORDERCOLOR = 29,
+    TSS_RECT = 30,                      /* a linear texture's size: width 31:16, height 15:0 */
 };
 
 static struct {
@@ -168,6 +169,7 @@ static void tss(uint32_t *t, unsigned s)
     t[TSS_ALPHAKILL] = (ctl0 >> 2) & 1;
     t[TSS_COLORSIGN] = filt & 0xF0000000u;
     t[TSS_BORDERCOLOR] = R(b + 0x24);
+    t[TSS_RECT] = R(b + 0x1C);                          /* SET_TEXTURE_IMAGE_RECT */
     /* SET_TEXTURE_SET_BUMP_ENV_MAT 00 01 10 11, SCALE, OFFSET, where written */
     for (unsigned i = 0; i < 6; i++) {
         if (W(b + 0x28 + 4 * i)) {

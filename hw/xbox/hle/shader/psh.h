@@ -77,7 +77,9 @@ typedef struct HlePshKey {
     uint8_t vol;                        /* stages whose texture is a volume (bits 0-3):
                                            2D-coordinate modes fetch it in 3D, as the NV2A
                                            (LLE): PROJECT2D at r = 0, bump-env at the
-                                           coordinates' r */
+                                           coordinates' r; bits 4-7: the stage whose
+                                           linear texture is kept to its own size, part
+                                           of a larger surface (ff.h HLE_NVRECT_GLSL) */
     uint8_t wbuf;                       /* W-buffering: depth = vW (HLE_WBUF_*_GLSL) */
     uint8_t fbfetch;                    /* stages (bits 0-3) whose texture is the colour
                                            target drawn into: its pixel, read as the

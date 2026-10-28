@@ -67,6 +67,7 @@ enum {
                                    22..25 to BUMP_ENV_MAT 0..3 (Otogi 0xf5c50) */
     TSS_BUMPENVLSCALE = 26, TSS_BUMPENVLOFFSET,
     TSS_TEXCOORDINDEX = 28, TSS_BORDERCOLOR = 29,
+    TSS_RECT = 30,              /* a linear texture's size: width 31:16, height 15:0 */
 };
 
 /* Two floats (bits) as IEEE halves, a in the low 16 bits (GLSL
@@ -2438,6 +2439,25 @@ static uint32_t stage_slot(const HleCmdDraw *c, unsigned st, uint32_t rt_id, uin
     return slot;
 }
 
+/* The push block's fog.w for stage st (ki: its stage in the shader) when its
+ * linear texture is a surface larger than the texture's own size (the top-left
+ * part of a target): that size and the stage's address modes, its texel
+ * coordinates kept inside it (ff.h HLE_NVRECT_GLSL); 0 when the surface is the
+ * texture's size or it is no surface (a texture's image is its size). */
+static uint32_t lin_rect(const HleCmdDraw *c, const HleCmdState *s, unsigned st, unsigned ki)
+{
+    const HleVkSurf *sf = (c->tex_lin >> st & 1) && c->tex[st] && !tex_find(c->tex[st]) ?
+                          hle_surf_get(c->tex[st]) : NULL;
+    const uint32_t r = s->tss[st][TSS_RECT], w = r >> 16, h = r & 0xFFFF;
+    if (!sf || !w || !h || w > 0x1FFF || h > 0x1FFF || (w >= sf->d.w && h >= sf->d.h)) {
+        return 0;
+    }
+    /* NV2A modes: 1 wrap, 2 mirror, 3 clamp to edge, 4 border, 5 clamp (as addr_mode) */
+    static const uint8_t k_class[8] = { 2, 2, 3, 0, 1, 0, 2, 2 };
+    return w | h << 13 | (uint32_t)k_class[s->tss[st][TSS_ADDRESSU] & 7] << 26 |
+           (uint32_t)k_class[s->tss[st][TSS_ADDRESSV] & 7] << 28 | ki << 30;
+}
+
 /* Vertex-buffer support of f, else of its four-component form (one more
  * element read past the attribute), else UNDEFINED. */
 static VkFormat vfmt(VkFormat f, VkFormat wide)
@@ -3405,6 +3425,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     memcpy(&pc.fog[0], &s->rs[RS_FOGSTART], 4);
     memcpy(&pc.fog[1], &s->rs[RS_FOGEND], 4);
     memcpy(&pc.fog[2], &s->rs[RS_FOGDENSITY], 4);
+    uint32_t rect = 0;                  /* lin_rect's, the first stage's that has one */
     /* POINTSPRITEENABLE: the cascade is texture stage 3 alone (ff.h) */
     unsigned first = s->rs[RS_POINTSPRITEENABLE] ? HLE_FF_SPRITE_STAGE : 0;
     for (unsigned st = first; st < HLE_FF_STAGES; st++) {
@@ -3428,6 +3449,11 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         uint32_t slot = shadow_fmt(c->tex[st]) ? 0 : stage_slot(c, st, rt_id, &lin);
         pc.flags |= (lin >> st & 1) << ki | (lin >> (st + 8) & 1) << (ki + 8);
         fs->texture = c->tex[st] != 0;
+        /* (a point sprite's stage samples at the point's coordinates) */
+        if (slot && !rect && (ki || c->prim != 0 || !s->rs[RS_POINTSPRITEENABLE]) &&
+            (rect = lin_rect(c, s, st, ki))) {
+            fs->texture |= HLE_FF_TEX_RECT;
+        }
         fs->unset = c->tex_unset >> st & 1;
         fs->alpha_kill = fs->texture && t[TSS_ALPHAKILL] != 0;
         pc.tex[ki] = slot | sampler_index(t, stage_lod_down(c, st, rt_id)) << 16;
@@ -3441,10 +3467,15 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
          * shaders feed all four coordinate sets */
         memset(&k.ps, 0, sizeof(k.ps));
         pc.flags = 0;
+        rect = 0;
+        unsigned rect_st = 0;
         for (unsigned st = 0; st < HLE_FF_STAGES; st++) {
             pc.tex[st] = stage_slot(c, st, rt_id, &pc.flags) |
                          sampler_index(s->tss[st], stage_lod_down(c, st, rt_id)) << 16;
             k.vs.texcoord[st] = s->tss[st][TSS_TEXCOORDINDEX] & 7;
+            if (!rect && (pc.tex[st] & 0xFFFFu) && (rect = lin_rect(c, s, st, st))) {
+                rect_st = st;
+            }
         }
         k.vs.ntex = HLE_FF_STAGES;
         k.psh = 1;
@@ -3481,6 +3512,11 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             } else if (m == HLE_PST_PROJECT3D && flat && !((k.pk.shadow >> st) & 1)) {
                 k.pk.tex_modes -= (HLE_PST_PROJECT3D - HLE_PST_PROJECT2D) << (5 * st);
             }
+        }
+        if (rect && !((k.pk.shadow >> rect_st) & 1)) {
+            k.pk.vol |= 16u << rect_st;         /* its texture kept to its own size */
+        } else {
+            rect = 0;
         }
         if (k.pk.shadow) {
             uint32_t f = s->rs[RS_SHADOWFUNC];
@@ -3939,6 +3975,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     pc.zscale = wbuf && wff ? c->wscale : c->zscale;
     pc.tfactor = s->rs[RS_TEXTUREFACTOR];
     pc.alpha_ref = (s->rs[RS_ALPHAREF] & 0xFF) / 255.0f;
+    memcpy(&pc.fog[3], &rect, 4);       /* (bits: HLE_NVRECT_GLSL) */
     /* the target's scale (point sizes, texel edges) and linear surfaces'
      * (always scaled); antialiased: texel edges as they are (ff.h) */
     pc.flags |= MIN(rs, 255u) << 16 | MIN(g_hle_rscale, 255u) << 24 |

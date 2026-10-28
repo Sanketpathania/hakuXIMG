@@ -515,6 +515,12 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
     if (k->fbfetch & HLE_FB_ZEQ) {
         put(&b, HLE_ZEQ_DECL_GLSL);
     }
+    for (unsigned s = 0; s < k->nstages; s++) {
+        if (k->st[s].texture & HLE_FF_TEX_RECT) {
+            put(&b, HLE_NVRECT_GLSL);
+            break;
+        }
+    }
     put(&b, "void main() {\n  vec4 cur = vDiffuse, tmp = vec4(0.0), r;\n");
     if (k->wbuf) {
         put(&b, HLE_WBUF_CALC_GLSL);
@@ -533,11 +539,14 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
             if (s == 0 && k->point_sprite) {
                 put(&b, "  vec2 uv0 = gl_PointCoord;\n");
             } else {
-                put(&b, "  vec2 uv%u = nvproj(vTex%u).xy;\n"
-                        "  if ((pc.flags & %uu) != 0u) uv%u /= vec2(textureSize(sampler2D("
+                put(&b, "  vec2 uv%u = nvproj(vTex%u).xy;\n", s, s);
+                if (st->texture & HLE_FF_TEX_RECT) {
+                    put(&b, "  uv%u = nvrect(uv%u);\n", s, s);
+                }
+                put(&b, "  if ((pc.flags & %uu) != 0u) uv%u /= vec2(textureSize(sampler2D("
                         "uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], uSmp[0]), 0)) /\n"
                         "      ((pc.flags & %uu) != 0u ? float(pc.flags >> 24) : 1.0);\n",
-                    s, s, 1u << s, s, s, 256u << s);
+                    1u << s, s, s, 256u << s);
             }
             put(&b, "  vec4 t%u = texture(sampler2D(uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], "
                     "uSmp[nonuniformEXT(pc.tex[%u] >> 16)]), uv%u);\n",

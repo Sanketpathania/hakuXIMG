@@ -120,7 +120,8 @@ typedef struct HleFfStage {
     uint32_t colorop, colorarg0, colorarg1, colorarg2;
     uint32_t alphaop, alphaarg0, alphaarg1, alphaarg2;
     uint32_t resultarg;
-    uint8_t texture;                  /* a texture is bound to this stage */
+    uint8_t texture;                  /* a texture is bound to this stage (bit 0),
+                                         kept to its own size (HLE_FF_TEX_RECT) */
     uint8_t tex_dim;                  /* 2 = 2D, 3 = cube, 4 = volume */
     uint8_t alpha_kill;               /* D3DTSS_ALPHAKILL: texel alpha 0 discards */
     uint8_t unset;                    /* no texture set (D3D's Textures[stage] NULL): an
@@ -173,7 +174,9 @@ typedef struct HleFfPush {
     float zscale;                     /* vertex programs: 1 / depth maximum (2^-n for
                                          the integer formats: HLE_ZNORM_GLSL) */
     uint32_t fog_color;               /* FOGCOLOR (D3DCOLOR) */
-    float fog[4];                     /* FOGSTART, FOGEND, FOGDENSITY, 0 */
+    float fog[4];                     /* FOGSTART, FOGEND, FOGDENSITY, then (bits) a
+                                         linear texture's own size, clamped to
+                                         (HLE_NVRECT_GLSL) */
     uint32_t psc[20];                 /* pixel shaders: C0[8], C1[8], final C0, C1
                                          (D3DCOLOR), W-buffer offset and slope */
     float scr[4];                     /* fixed function: D3D screen pixels = xy *
@@ -201,6 +204,32 @@ typedef struct HleFfPush {
 
 /* The block in a storage buffer (set by the back end before any shader is made) */
 extern bool g_hle_push_ssbo;
+
+/* A linear texture is addressed by texel within its own size (its image
+ * rect), clamped, bordered or wrapped at its edges. One sampled from a larger
+ * surface (a target's top-left part: Munch's Oddysee samples the top 128 rows
+ * of its 128 x 2048 shadow target as a 128 x 128 texture, clamped) has its
+ * texel coordinates kept inside that size first, as the stage's address mode
+ * says: else the sampler's edges are the surface's, and the rows past the
+ * texture's (black) drew a box over the ground. The push block's fog.w (bits,
+ * vk/draw.c lin_rect): width 0-12, height 13-25, U's and V's mode 26-27 and
+ * 28-29 (0 clamp, 1 border, 2 wrap, 3 mirror), the stage 30-31 (one a draw);
+ * a stage outside the border goes far outside the image, to the sampler's
+ * border colour. Emitted only for the keys that ask (HleFfStage.texture's
+ * HLE_FF_TEX_RECT, HlePshKey.vol's high bits). */
+#define HLE_NVRECT_GLSL \
+    "float nvaxis(float u, float n, uint m) {\n" \
+    "  if (m == 2u) return u - n * floor(u / n);\n" \
+    "  if (m == 3u) { float f = u - 2.0 * n * floor(u / (2.0 * n)); return f < n ? f : 2.0 * n - f; }\n" \
+    "  if (m == 1u && (u < 0.0 || u > n)) return -65536.0;\n" \
+    "  return clamp(u, 0.5, n - 0.5);\n" \
+    "}\n" \
+    "vec2 nvrect(vec2 uv) {\n" \
+    "  uint r = floatBitsToUint(pc.fog.w);\n" \
+    "  return vec2(nvaxis(uv.x, float(r & 0x1FFFu), (r >> 26) & 3u),\n" \
+    "              nvaxis(uv.y, float((r >> 13) & 0x1FFFu), (r >> 28) & 3u));\n" \
+    "}\n"
+#define HLE_FF_TEX_RECT 2u              /* HleFfStage.texture: its texture kept to its size */
 
 /* Mali (vk/quirks.h HLE_QUIRK_Z_EQ_W, set with g_hle_push_ssbo): a clip-space
  * z equal to w corrupts the depth buffer (PPSSPP's EQUAL_WZ_CORRUPTS_DEPTH,

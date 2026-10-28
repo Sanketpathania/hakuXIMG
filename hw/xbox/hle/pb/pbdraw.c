@@ -4705,14 +4705,19 @@ static void coh_shown(PbObj *o)
      * into the snapshot without, they were the image's, and a landing (a
      * savestate's) put the old frame over them, textures loaded into a
      * frame buffer's memory a Reset freed. Not as a target the CPU uses: a
-     * writeback at each unbind, were it drawn into again. */
+     * writeback at each unbind, were it drawn into again. Uploaded, its
+     * image is its memory; a texture defined from that memory since its
+     * last draw (whose check took the CPU's writes there: none to upload),
+     * the title's data is there: synced either way, no old frame lands. */
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         PbObj *x = &g_pd.objs[i];
         if (x->display && g_coh_shows + 1 - x->shown_seq > COH_SHOWN_RECENT) {
-            rt_cpu_upload(x->id, false);
+            const bool uploaded = rt_cpu_upload(x->id, false);
             x->display = false;
             x->armed_drops = 0;
-            if (coh_len(x, &xl)) {
+            if (coh_len(x, &xl) && (uploaded || obj_superseded(x))) {
+                coh_synced(x, xl);
+            } else if (coh_len(x, &xl)) {
                 coh_snap_take(x->d.pa, xl, &x->snap);
                 x->mn_epoch = 0;
                 hle_host_mem_rearm(x->d.pa, xl);

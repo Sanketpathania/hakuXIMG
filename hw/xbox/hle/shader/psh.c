@@ -346,8 +346,12 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "uniform subpassInput uFb;\n" : "",
         k->fbfetch & HLE_FB_ZEQ ? HLE_ZEQ_DECL_GLSL : "",
         /* a linear texture kept to its own size (ff.h HLE_NVRECT_GLSL): the stage fog.w names */
-        k->vol >> 4 ? HLE_NVRECT_GLSL : "",
-        k->vol >> 4 ? "  if (s == floatBitsToUint(pc.fog.w) >> 30) uv = nvrect(uv);\n" : "",
+        k->vol & HLE_PSH_RECT ? HLE_NVRECT_GLSL : "",
+        k->vol & HLE_PSH_RECT ?
+            "  { uint r = floatBitsToUint(pc.fog.w);\n"
+            "    if (r != 0u && s == ((r >> 28 & 1u) | (r >> 30 & 2u)))\n"
+            "      uv = nvrect(uv, (pc.flags & (256u << s)) != 0u ? 0.5 / float(pc.flags >> 24) : 0.5); }\n"
+            : "",
         /* HILO_1: the texel's two 16-bit halves, unsigned, and 1 (only where a
          * stage maps so: other shaders' text, and their cached SPIR-V, stay) */
         hilo1 ? "  if (m == 4u) { uvec4 i = uvec4(c * 255.0 + 0.5);\n"

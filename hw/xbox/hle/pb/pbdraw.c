@@ -3061,6 +3061,8 @@ static void emit(HleCmdDraw *d)
         d->tex[s] = texture(s, &unset, &lin);
         d->tex_unset |= (uint32_t)unset << s;
         d->tex_lin |= (uint32_t)lin << s;
+        /* per draw: the state cache isn't rebuilt when only a texture changes */
+        d->tex_rect[s] = lin ? R(NV097_SET_TEXTURE_IMAGE_RECT + 64 * s) : 0;
         d->tex_ord |= tex_order(s, d->tex[s]) << 2 * s;
     }
     state();

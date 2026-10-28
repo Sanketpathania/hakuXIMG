@@ -1055,6 +1055,8 @@ static void mode_sync(void)
 
 static void coh_drawn(PbObj *o);
 static void coh_first_write(PbObj *o, bool full);
+static bool coh_managed(const PbObj *o, uint32_t *len);
+static void coh_land_over(const PbObj *o, uint32_t len);
 
 /* The targets the surface methods describe, bound when they changed. */
 static void sync_rt(void)
@@ -1199,6 +1201,22 @@ static void rt_first_write(bool full)
     }
 }
 
+/* Before the first write ever into the bound target, a draw or a clear of
+ * part of it (its memory about to be uploaded into its image: never drawn,
+ * the memory is all there is): what newer the other images over that
+ * memory hold lands there first (coh_land_over). At the draw's start and the
+ * clear's, not in rt_first_write: a draw's comes after its arena blocks,
+ * and a landing kicks and waits; with the GPU idle the arena starts again
+ * at 0, over them. Once an object: never drawn into, its memory newer. */
+static void rt_first_land(bool full)
+{
+    PbObj *o = g_pd.rt_fresh && !full ? obj_of(g_pd.rt) : NULL;
+    uint32_t len;
+    if (o && !o->written && coh_managed(o, &len)) {
+        coh_land_over(o, len);
+    }
+}
+
 static void clear(uint32_t flags)
 {
     sync_rt();
@@ -1207,8 +1225,10 @@ static void clear(uint32_t flags)
     const int32_t ax = (int32_t)MAX(g_pd.aa_x, 1u), ay = (int32_t)MAX(g_pd.aa_y, 1u);
     HleRect r = { (int32_t)(hr & 0xFFFF) * ax, (int32_t)(vr & 0xFFFF) * ay,
                   (int32_t)((hr >> 16) + 1) * ax, (int32_t)((vr >> 16) + 1) * ay };
-    rt_first_write((flags & 0xF0) == 0xF0 && R(0x0358) == 0x01010101u && r.x1 <= 0 && r.y1 <= 0 &&
-                   (uint32_t)r.x2 >= g_pd.rt_w && (uint32_t)r.y2 >= g_pd.rt_h);
+    const bool full = (flags & 0xF0) == 0xF0 && R(0x0358) == 0x01010101u && r.x1 <= 0 && r.y1 <= 0 &&
+                      (uint32_t)r.x2 >= g_pd.rt_w && (uint32_t)r.y2 >= g_pd.rt_h;
+    rt_first_land(full);
+    rt_first_write(full);
     if (!g_pd.rt && !g_pd.ds) {
         return;
     }
@@ -3509,6 +3529,7 @@ static void draw(void)
         }
         return;
     }
+    rt_first_land(false);
     if (g_pd.nimm) {
         draw_imm();
     } else if (g_pd.ninl) {
@@ -4566,6 +4587,40 @@ static void coh_upload_swz(PbObj *o, uint32_t len)
     hle_fe_commit();
     o->written = ++g_pd.wseq;
     g_pd.rt_uploads++;
+}
+
+/* What newer the others over o's memory (len) hold lands there first,
+ * waited for: o's image is about to take that memory (rt_first_land). D3D
+ * clears a swizzled target through a linear view of its memory
+ * (object_view), and before the swizzled one has an object, the clear goes
+ * to the view's: Morrowind's inventory character, drawn for the first time
+ * after a load, went over its target's older memory instead of red, and the
+ * keying left the edges it had bled into that red opaque around it. As
+ * coh_serve: the image of the newest writer among the targets the coherence
+ * keeps; the old paths' writebacks in flight there (a small view's, one the
+ * CPU used) land before it. */
+static void coh_land_over(const PbObj *o, uint32_t len)
+{
+    PbObj *best = NULL;
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        PbObj *x = &g_pd.objs[i];
+        uint32_t xl;
+        if (x != o && coh_managed(x, &xl) && x->d.pa < o->d.pa + len && x->d.pa + xl > o->d.pa &&
+            x->written > x->synced && (!best || x->written > best->written)) {
+            best = x;
+        }
+    }
+    uint64_t v = best ? coh_land(best) : 0;
+    const uint64_t done = hle_tl_completed();
+    for (unsigned i = 0; i < WB_NOTES; i++) {
+        if (g_wbn[i].v > done && g_wbn[i].pa < o->d.pa + len && o->d.pa < g_wbn[i].pa + g_wbn[i].len) {
+            v = MAX(v, g_wbn[i].v);
+        }
+    }
+    if (v) {
+        coh_wait(v);
+        coh_adopt();
+    }
 }
 
 static void coh_first_write(PbObj *o, bool full)

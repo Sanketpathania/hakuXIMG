@@ -13,6 +13,7 @@
 #include "hw/xbox/hle/vk/back.h"
 #include "hw/xbox/hle/vk/display.h"
 #include "hw/xbox/hle/vk/guest_ram.h"
+#include "hw/xbox/hle/vk/quirks.h"
 #include "hw/xbox/hle/pb/pbres.h"
 #include "hw/xbox/hle/tex/xdk.h"
 #include "hw/xbox/hle/tex/xdk_res.h"
@@ -3266,6 +3267,88 @@ static bool recopied(uint32_t from, uint32_t len)
     return t[i].again;
 }
 
+/* The bytes of an attribute's component as the back end fetches it, which
+ * its address must be a multiple of (vk/draw.c vat_format: CMP as 16-bit
+ * halves). */
+static uint32_t attr_comp(uint32_t fmt)
+{
+    switch (fmt & 0xF) {
+    case 0: case 4: return 1;               /* UB_D3D, UB_OGL */
+    case 1: case 5: case 6: return 2;       /* S1, S32K, CMP */
+    default: return 4;                      /* F */
+    }
+}
+
+/* HLE_QUIRK_VB_ALIGN: an attribute of binding b (its vertex 0 at base)
+ * whose address its components don't divide, at some vertex. */
+static bool vb_misaligned(const HleCmdDraw *d, unsigned b, uint32_t base)
+{
+    for (unsigned a = 0; a < HLE_DRAW_ATTRS; a++) {
+        const uint32_t x = d->attr[a], c = attr_comp(x & 0xFF);
+        if (((x >> 4) & 0xF) && ((x >> 8) & 0xFF) == b &&
+            ((base + (x >> 16)) % c || d->bind_stride[b] % c)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* HLE_QUIRK_VB_ALIGN: binding b's n vertices (src, len bytes from from)
+ * copied to the arena with each attribute at an offset its components
+ * divide, in the order they had, and a stride 4 divides; the draw's
+ * attributes and binding say where. False: no room. */
+static bool vb_realign(HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t from, uint32_t len,
+                       uint32_t n)
+{
+    struct { unsigned a; uint32_t off, size, to; } at[HLE_DRAW_ATTRS];
+    unsigned na = 0;
+    for (unsigned a = 0; a < HLE_DRAW_ATTRS; a++) {
+        const uint32_t x = d->attr[a];
+        if (((x >> 4) & 0xF) && ((x >> 8) & 0xFF) == b) {
+            unsigned k = na++;
+            while (k && at[k - 1].off > (x >> 16)) {
+                at[k] = at[k - 1];
+                k--;
+            }
+            at[k].a = a;
+            at[k].off = x >> 16;
+            at[k].size = attr_bytes(x & 0xFF);
+        }
+    }
+    uint32_t end = 0;
+    for (unsigned i = 0; i < na; i++) {
+        at[i].to = ROUND_UP(end, attr_comp(d->attr[at[i].a] & 0xFF));
+        end = at[i].to + at[i].size;
+    }
+    const uint32_t st = d->bind_stride[b], ns = st ? ROUND_UP(end, 4u) : 0;
+    uint8_t *dst;
+    const uint32_t off = arena(st ? n * ns : end, &dst);
+    if (off == HLE_ARENA_FULL) {
+        return false;
+    }
+    if (recopied(from, len)) {
+        hle_barrier_arm_copied(from, len);
+    }
+    for (uint32_t v = 0; v < (st ? n : 1); v++) {
+        for (unsigned i = 0; i < na; i++) {
+            memcpy(dst + v * ns + at[i].to, src + v * st + at[i].off, at[i].size);
+        }
+    }
+    static bool said;
+    if (!said) {
+        said = true;
+        hle_log("hakuX-hle-pb", "vb_align: a binding of stride %u at %08x copied with its attributes aligned "
+                "(stride %u)", st, from, ns);
+    }
+    for (unsigned i = 0; i < na; i++) {
+        d->attr[at[i].a] = (d->attr[at[i].a] & 0xFFFFu) | at[i].to << 16;
+    }
+    d->bind_stride[b] = ns;
+    d->bind_off[b] = off;
+    g_pd.vb_copied++;
+    return true;
+}
+
 /* The vertex arrays the indices reach, read in place or copied to the
  * arena, the indices converted for the primitive and rebased. */
 static void draw_arrays(void)
@@ -3323,6 +3406,13 @@ static void draw_arrays(void)
         uint32_t len = st ? (hi - lo) * st + MAX(end[b], 1u) : end[b];
         coh_pend_wait(from, len);           /* a copy queued into it lands first */
         const uint8_t *src = hle_pa_ptr(from, len);
+        if (src && hle_quirk(HLE_QUIRK_VB_ALIGN) && vb_misaligned(&d, b, base[b])) {
+            if (!vb_realign(&d, b, src, from, len, st ? hi - lo + 1 : 1)) {
+                skip(SK_DRAW_ARRAYS_ARENA);
+                return;
+            }
+            continue;
+        }
         if (src && vb_in_place() && !hle_barrier_contended(from, len)) {
             hle_barrier_arm(from, len, hle_fe_last_value() + 1);
             d.guest_vb |= 1u << b;

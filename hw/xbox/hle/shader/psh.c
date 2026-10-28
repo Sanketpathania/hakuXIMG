@@ -276,6 +276,16 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     Buf b = { buf, cap, 0, false };
     const char *interp = k->flat ? "flat " : "";
     unsigned unsup = 0;
+    /* PSDotMapping HILO_1 (4) in a stage's field: dmap reads the 32-bit texel
+     * as two 16-bit halves, hi A:R and lo G:B, over 65535 (as xemu). Read as
+     * two signed bytes (R, G), the depth buffer Halo 2's fog pass reads as
+     * A8R8G8B8 (its top 16 bits in A:R) gave its fog-table lookup depth bits
+     * 8-15, which wrap every 256 steps: stripes of fog and none across the
+     * scenery, moving with the camera. */
+    bool hilo1 = false;
+    for (unsigned s = 0; s < 3; s++) {
+        hilo1 |= ((k->dot_map >> (4 * s)) & 7) == 4;
+    }
     put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s",
         hle_push_glsl());
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
@@ -316,6 +326,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             /* PSDotMapping of a texture color to a vector */
             "vec3 dmap(uint m, vec4 c) {\n"
             "  if (m == 0u) return c.rgb;\n"
+            "%s"
             "  if (m == 3u) { vec3 v = floor(c.rgb * 255.0 + 0.5);\n"
             "    return mix(v, v - 256.0, greaterThanEqual(v, vec3(128.0))) / 127.0; }\n"
             "  if (m >= 4u) { vec2 h = c.rg * 2.0 - 1.0;\n"
@@ -337,6 +348,10 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         /* a linear texture kept to its own size (ff.h HLE_NVRECT_GLSL): the stage fog.w names */
         k->vol >> 4 ? HLE_NVRECT_GLSL : "",
         k->vol >> 4 ? "  if (s == floatBitsToUint(pc.fog.w) >> 30) uv = nvrect(uv);\n" : "",
+        /* HILO_1: the texel's two 16-bit halves, unsigned, and 1 (only where a
+         * stage maps so: other shaders' text, and their cached SPIR-V, stay) */
+        hilo1 ? "  if (m == 4u) { uvec4 i = uvec4(c * 255.0 + 0.5);\n"
+                "    return vec3(float(i.a << 8 | i.r), float(i.g << 8 | i.b), 65535.0) / 65535.0; }\n" : "",
         k->point_sprite ? "vec4(gl_PointCoord, 1.0, 1.0)" : "vTex3i");
     if (k->wbuf) {
         put(&b, HLE_WBUF_CALC_GLSL);

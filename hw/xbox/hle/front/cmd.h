@@ -227,6 +227,10 @@ typedef struct HleCmdReadback {
     uint32_t fb, fb_len;            /* fb 0: none */
 } HleCmdReadback;
 #define HLE_RB_DIRECT 0xFFFFFFFFu
+/* arena_off: the subresource packed as above into the landing buffer (the
+ * arena without one) at fb - 1, swizzled into guest memory at the value
+ * (hle_tl_land_swz) */
+#define HLE_RB_PACKED 0xFFFFFFFEu
 
 /* ---- P3 draws ------------------------------------------------------------- */
 

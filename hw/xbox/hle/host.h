@@ -52,12 +52,25 @@ void hle_va_store(uint32_t va, uint32_t len);
 
 /* Written since the last test_and_clear (the page not tracked: written). */
 bool hle_host_mem_dirty(uint32_t pa);
+/* The page not tracked (written open: the guest's stores to it go unseen
+ * till a test_and_clear or rearm protects it again; not one without guest
+ * access, whose stores fault). */
+bool hle_host_mem_open(uint32_t pa);
 /* Whether [pa, pa + len) was written since the last call, and from now on
  * tracked again (the guest's next write to each page is seen:
  * hle_mem_first_write in mem/barrier.c). */
 bool hle_host_mem_test_and_clear(uint32_t pa, uint32_t len);
-/* [pa, pa + len) written by a device or the host: dirty. */
+/* [pa, pa + len) written by a device or the host: dirty (and newer than the
+ * images of the targets guarded over it: their guards go). */
 void hle_host_mem_set_dirty(uint32_t pa, uint32_t len);
+/* ... by a target's image landing there: dirty, its guard kept (the
+ * barrier drops it when the guest takes the memory), the pages' protection
+ * left as it is. */
+void hle_host_mem_landed(uint32_t pa, uint32_t len);
+/* [pa, pa + len) protected again, so the guest's next store to a page is
+ * seen (hle_mem_first_write), the pages still dirty for test_and_clear if
+ * they were. */
+void hle_host_mem_rearm(uint32_t pa, uint32_t len);
 /* [pa, pa + len)'s pages without guest access (on), reads included: the
  * guest's next access faults to hle_mem_stale_access (mem/barrier.c); off:
  * back to what write tracking wants. The host's own view keeps its access. */

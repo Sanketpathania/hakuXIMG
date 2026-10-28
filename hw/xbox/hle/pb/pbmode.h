@@ -21,6 +21,10 @@ void hle_pb_stop(void);
 bool hle_pb_active(void);
 /* The host: the guest wrote channel 0's DMA_PUT (any thread). */
 void hle_pb_kick(void);
+/* Any thread: the decoder stops at its next method (pbdraw.c
+ * hle_pbd_boundary: what was recorded up to value submitted, a guest
+ * thread's landing request served), or at its next pass. */
+void hle_pb_boundary_request(uint64_t value);
 /* The guest wrote DMA_PUT (its vCPU thread): a kick, and the thread known to
  * the stutter / hang monitor (hitch.h) */
 void hle_pb_put(void);

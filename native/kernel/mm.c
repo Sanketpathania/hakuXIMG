@@ -831,6 +831,9 @@ void nc_mm_keep_save(NcKernel *k, uint32_t saved)
     for (unsigned i = 0; ok && i < g_nkept; i++) {
         const uint32_t pa = kept_pa(k, g_kept[i].va), len = g_kept[i].len;
         const uint32_t rec[2] = {g_kept[i].va, len};
+        if (pa < k->vm->ram_size && len <= k->vm->ram_size - pa) {
+            nc_vm_will_read(NC_CONTIG_WINDOW + pa, len);    /* the window's pages a target closed */
+        }
         ok = pa < k->vm->ram_size && len <= k->vm->ram_size - pa && fwrite(rec, sizeof(rec), 1, fp) == 1 &&
              fwrite(k->vm->ram + pa, 1, len, fp) == len;
         bytes += len;

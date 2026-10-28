@@ -405,7 +405,7 @@ bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext)
             }
         }
     }
-    if (nc_hle_dirty_fault(info)) {
+    if (nc_hle_dirty_fault(info, ucontext)) {
         __atomic_fetch_add(&g_nc_faults_dirty, 1, __ATOMIC_RELAXED);
         return true;
     }

@@ -176,16 +176,29 @@ void nc_vm_protect_pages(NcVm *vm, uint32_t pa, uint32_t n, bool ro)
             __atomic_store_n(&vm->wp[page + i], NC_WP_CLEAN, __ATOMIC_RELEASE);
         }
     }
-    prot_views(vm, page, n, prot);
+    /* pages without access stay so (nc_vm_noaccess): only the runs between
+     * them change, none opened even for a moment (a guest store there
+     * would go untracked); one closed meanwhile is closed again after */
+    for (uint32_t i = 0; i < n;) {
+        if (g_na && __atomic_load_n(&g_na[page + i], __ATOMIC_ACQUIRE)) {
+            i++;
+            continue;
+        }
+        uint32_t k = 1;
+        while (i + k < n && !(g_na && __atomic_load_n(&g_na[page + i + k], __ATOMIC_ACQUIRE))) {
+            k++;
+        }
+        prot_views(vm, page + i, k, prot);
+        for (uint32_t j = i; g_na && j < i + k; j++) {
+            if (__atomic_load_n(&g_na[page + j], __ATOMIC_ACQUIRE)) {
+                prot_views(vm, page + j, 1, PROT_NONE);
+            }
+        }
+        i += k;
+    }
     if (!ro) {
         for (uint32_t i = 0; i < n; i++) {
             __atomic_store_n(&vm->wp[page + i], 0, __ATOMIC_RELEASE);
-        }
-    }
-    /* pages without access stay so (nc_vm_noaccess) */
-    for (uint32_t i = 0; g_na && i < n; i++) {
-        if (__atomic_load_n(&g_na[page + i], __ATOMIC_ACQUIRE)) {
-            prot_views(vm, page + i, 1, PROT_NONE);
         }
     }
 }

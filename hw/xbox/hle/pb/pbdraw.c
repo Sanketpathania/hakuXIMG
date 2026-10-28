@@ -2876,19 +2876,20 @@ static unsigned writeback_range(uint32_t pa, uint32_t end, bool gpu_newer, const
             break;
         }
         after = next->written;
-        if (coh_managed(next, &len)) {
-            const uint64_t l = coh_land(next);
-            *lv = MAX(*lv, l);
-            n += l != 0;
-            continue;
-        }
         if (obj_superseded(next)) {
-            /* the title's data is there now (a texture defined from it) */
+            /* the title's data is there now (a texture defined from it), over
+             * a target the coherence keeps too: its image would be landed */
             if (gpu_newer) {
                 hle_log("hakuX-hle-pb", "%s: surface %u (%08x %ux%u) kept: textures took its memory since "
                         "its last draw", what, next->id, next->d.pa, next->d.w, next->d.h);
             }
             kept++;
+            continue;
+        }
+        if (coh_managed(next, &len)) {
+            const uint64_t l = coh_land(next);
+            *lv = MAX(*lv, l);
+            n += l != 0;
             continue;
         }
         if (gpu_newer && obj_written(next)) {
@@ -4696,14 +4697,19 @@ static void coh_shown(PbObj *o)
     if (!o) {
         return;
     }
-    g_coh_shows++;
     /* a frame buffer no longer shown lately leaves the front buffer's path:
      * kept again from its memory as it is now (its image the newer for what
-     * the GPU drew since it synced: guarded from its next draw) */
+     * the GPU drew since it synced: guarded from its next draw). The CPU's
+     * writes there go into its image first, while it is still shown lately
+     * (rt_cpu_upload passes over the targets the coherence keeps): taken
+     * into the snapshot without, they were the image's, and a landing (a
+     * savestate's) put the old frame over them, textures loaded into a
+     * frame buffer's memory a Reset freed. Not as a target the CPU uses: a
+     * writeback at each unbind, were it drawn into again. */
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         PbObj *x = &g_pd.objs[i];
-        if (x->display && g_coh_shows - x->shown_seq > COH_SHOWN_RECENT) {
-            rt_cpu_sync(x->id);             /* the CPU's writes there in first, the old path's */
+        if (x->display && g_coh_shows + 1 - x->shown_seq > COH_SHOWN_RECENT) {
+            rt_cpu_upload(x->id, false);
             x->display = false;
             x->armed_drops = 0;
             if (coh_len(x, &xl)) {
@@ -4713,6 +4719,7 @@ static void coh_shown(PbObj *o)
             }
         }
     }
+    g_coh_shows++;
     if (!coh_len(o, &len)) {
         coh_to_display(o, false);
         return;

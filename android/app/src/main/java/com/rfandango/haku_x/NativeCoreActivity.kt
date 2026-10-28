@@ -259,8 +259,8 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
      * meanwhile), and the ones cached built before the game starts. */
     args += "asyncpipe=${if (settings.asyncShaders) 1 else 0}"
     args += "prebuild=${if (settings.prebuildShaders) 1 else 0}"
-    /* Reads take the console's drives' time, their thread waiting (the
-     * game's other threads run meanwhile, as on the console). */
+    /* Reads take a quarter of the console's drives' time, their thread
+     * waiting (the game's other threads run meanwhile, as on the console). */
     args += "devtime=${if (settings.consoleTiming) 1 else 0}"
     /* The console's network (native/net): system link with the consoles on
      * this network (their broadcasts reach it under the multicast lock), or

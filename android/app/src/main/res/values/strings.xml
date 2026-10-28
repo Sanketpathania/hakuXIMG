@@ -202,7 +202,7 @@
   <string name="settings_language_desc">Games show their text and speech in it where they have it; the others keep their own. Takes effect at the next game start.</string>
   <string name="settings_language_auto">Auto: the phone\'s (%1$s)</string>
   <string name="settings_console_timing">Console drive timing</string>
-  <string name="settings_console_timing_desc">Disc and hard disk reads take as long as on the console at its fastest, so a game\'s other threads run while it loads, as games expect (off, some can freeze: Morrowind leaving a building). Loads are slower.</string>
+  <string name="settings_console_timing_desc">Disc and hard disk reads take time, a quarter of the console\'s at its fastest, so a game\'s other threads run while it loads, as games expect (off, some can freeze: Morrowind leaving a building). Loads are slower.</string>
   <string name="settings_section_updates">Updates</string>
   <string name="settings_update_check">Check for updates</string>
   <string name="settings_update_check_desc">hakuX %1$s. Looks for a newer release on GitHub, as the app also does each time it starts.</string>

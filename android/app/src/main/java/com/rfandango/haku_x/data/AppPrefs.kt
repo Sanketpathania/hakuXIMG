@@ -61,7 +61,7 @@ class AppPrefs(context: Context) {
     get() = sp.getBoolean(NativeCoreActivity.PREF_PREBUILD_SHADERS, true)
     set(value) = sp.edit { putBoolean(NativeCoreActivity.PREF_PREBUILD_SHADERS, value) }
 
-  /** Reads take the console's drives' time, the game's other threads running meanwhile (read at game start). */
+  /** Reads take a quarter of the console's drives' time, the game's other threads running meanwhile (read at game start). */
   var consoleTiming: Boolean
     get() = sp.getBoolean(KEY_CONSOLE_TIMING, true)
     set(value) = sp.edit { putBoolean(KEY_CONSOLE_TIMING, value) }

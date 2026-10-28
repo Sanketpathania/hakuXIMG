@@ -27,6 +27,9 @@
 #include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef __ANDROID__
+#include "hw/xbox/hle/prop.h"
+#endif
 
 #define STATUS_NO_MORE_FILES          0x80000006u
 #define STATUS_INVALID_DEVICE_REQUEST 0xC0000010u
@@ -639,8 +642,9 @@ static void complete(NcKernel *k, const uint32_t *a)
 #define DISC_JOBS 64
 
 /* Console timing (the app's setting, nc_io_set_device_time): a read takes at
- * least the time the console's drives take at their best, and the thread
- * that asked waits it out. At the phone's speed a load ran without its
+ * least a quarter of the time the console's drives take at their best (the
+ * whole of it made loads too slow), and the thread that asked waits it
+ * out. At the phone's speed a load ran without its
  * thread ever waiting, so the game's lower-priority threads didn't run
  * until it was done: Morrowind starts its loading screen's thread as a cell
  * load begins, and on the Xbox the thread sets up its first picture while
@@ -650,17 +654,24 @@ static void complete(NcKernel *k, const uint32_t *a)
  * So every synchronous read the file system's cache doesn't hold goes to
  * the reader, its caller waiting (NtReadFile), and the reader spends a
  * request's time plus the transfer at the drive's rate on each, one at a
- * time. NC_DEVTIME="disc_us,disc_kBps,hdd_us,hdd_kBps" tunes the drives. */
+ * time. NC_DEVTIME="disc_us,disc_kBps,hdd_us,hdd_kBps" (or the property
+ * debug.hakux.devtime, read at boot) tunes the drives. */
 static bool g_devtime;
 static struct DevRate {
     uint32_t req_us, kbps;
-} g_dev_disc = {500, 6900},     /* the DVD drive at 5x */
-  g_dev_hdd = {200, 20000};     /* the hard disk */
+} g_dev_disc = {125, 27600},    /* the DVD drive at 5x: 500 us, 6900 kB/s */
+  g_dev_hdd = {50, 80000};      /* the hard disk: 200 us, 20000 kB/s */
 
 void nc_io_set_device_time(bool on)
 {
     g_devtime = on;
     const char *e = getenv("NC_DEVTIME");
+#ifdef __ANDROID__
+    char v[PROP_VALUE_MAX];
+    if (!e && hle_prop_get("debug.hakux.devtime", v) > 0) {
+        e = v;
+    }
+#endif
     if (e) {
         sscanf(e, "%u,%u,%u,%u", &g_dev_disc.req_us, &g_dev_disc.kbps, &g_dev_hdd.req_us, &g_dev_hdd.kbps);
     }

@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.3.0
+
+Xbox Live through Insignia, and game fixes.
+
+### Xbox Live
+- **Insignia** — Settings → Network → Connection → Xbox Live: Insignia connects the console to Insignia, the revival of the original Xbox Live: Live games sign in, find matches and play online. If your Internet provider blocks Insignia's DNS server, point it at a computer running insigniaDNS instead
+- **Xbox Live setup** — Settings → Network → Xbox Live setup walks you through it, one step at a time: the connection, the Xbox dashboard, registering the console with Insignia's Setup Assistant (downloaded for you), then making or recovering your account in the dashboard
+- **Dashboard** — the library's Dashboard button (top left) starts the Xbox dashboard from the console's hard disk, where Xbox Live accounts are made and recovered. The first time, it installs the dashboard from a zip of its files (dashboard 5960)
+- **Title updates** — a game's Xbox Live update, once downloaded, starts with the game. Forza Motorsport's 60 and 120 fps mods cover its update too
+
+### Games
+- **Fable: The Lost Chapters** — the hero's face and arms are no longer black or noise
+- **Morrowind** — no longer freezes when you leave a building: disc and hard-disk reads now take a little time, as on the console. The inventory's character is drawn properly: it no longer stands on red with a black band over its head, or leaves ghost copies of itself around it after your first change of gear
+- **Halo 2** — the fog no longer shows as stripes that move with the camera
+- **Munch's Oddysee** — no dark box over the ground under the characters' shadows
+- **Project Zero II (PAL)** — no longer hangs on its first frame
+- **Amped 2** — no longer crashes as its first level loads
+- **Mortal Kombat: Shaolin Monks** — the models no longer explode on Mali-G57 GPUs
+
+### Performance
+- **Network** — with the network on (system link, XLink Kai or Insignia), the console no longer keeps most of a CPU core busy
+
+### App
+- **On-screen controls editor** — its toolbar wraps onto more rows on narrower screens, such as 4:3 handhelds, instead of pushing buttons off the edge
+
 ## v1.2.0
 
 System link, stability and compatibility improvements.

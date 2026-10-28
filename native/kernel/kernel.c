@@ -50,6 +50,7 @@ static const NcKExport *k_by_ordinal[NC_KORDINAL_MAX];
  * 1.4 MiB block its first level's load asks for (its heap took the rest at
  * boot): the call failed and it wrote through the null pointer. */
 #define POOL_SIZE  0x00010000u
+#define POOL_BASE_SPAN 0x00080000u   /* the first range's base below the top reserve */
 
 const NcKExport *nc_kernel_export(unsigned ordinal)
 {
@@ -464,8 +465,17 @@ bool nc_kernel_init(NcKernel *k, NcVm *vm)
     }
 
     /* The pool's first range comes from high RAM (below the top reserve):
-     * low RAM is the title's (nc_vm_alloc_at). */
-    const uint32_t pool_pa = nc_vm_alloc_phys_ex(vm, POOL_SIZE, 0, vm->ram_size - NC_TOP_RESERVE, NC_PAGE, true);
+     * low RAM is the title's (nc_vm_alloc_at). It starts where the 512 KiB
+     * range did (POOL_BASE_SPAN below the reserve), so the objects made at
+     * boot are where states saved before expect them (nc_kern_state_load
+     * checks the process object's address); the rest of that span is the
+     * title's. At the top of it, the process object moved and those states
+     * didn't load. */
+    const uint32_t pool_lo = vm->ram_size - NC_TOP_RESERVE - POOL_BASE_SPAN;
+    uint32_t pool_pa = nc_vm_alloc_phys_ex(vm, POOL_SIZE, pool_lo, pool_lo + POOL_SIZE, NC_PAGE, false);
+    if (pool_pa == UINT32_MAX) {
+        pool_pa = nc_vm_alloc_phys_ex(vm, POOL_SIZE, 0, vm->ram_size - NC_TOP_RESERVE, NC_PAGE, true);
+    }
     if (pool_pa == UINT32_MAX) {
         return false;
     }

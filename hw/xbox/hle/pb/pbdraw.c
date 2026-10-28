@@ -1586,6 +1586,11 @@ void hle_pbd_cpu_display(uint32_t pa)
     if (!o) {
         return;
     }
+    /* the front buffer's path, as a swap's (coh_shown): kept by the
+     * coherence instead, the frame buffer's memory was never newer than its
+     * image to the scanout (rt_cpu_upload), and Insignia's Setup Assistant
+     * showed its first frame for good */
+    coh_shown(o);
     rt_upload(o, id, false);
     present_now(id);
     hle_log("hakuX-hle-pb", "frame buffer %08x %ux%u format %02x: the title draws it with the CPU (no GPU device), "

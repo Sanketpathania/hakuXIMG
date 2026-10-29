@@ -31,11 +31,13 @@ jobs:
 
       - name: Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: |
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/HakuxPVR.apk
 
-      - name: Upload Debug APK Artifact
+      - name: Upload HakuxPVR APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hakuX-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: HakuxPVR
+          path: android/app/build/outputs/apk/debug/HakuxPVR.apk
           if-no-files-found: error

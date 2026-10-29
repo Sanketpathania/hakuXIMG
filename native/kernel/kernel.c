@@ -686,12 +686,12 @@ static void stats_tick(NcKernel *k)
     static uint64_t faults_seen, mmio_seen, apu_seen, commits_seen, decommits_seen, ticks_seen;
     const uint64_t ticks = __atomic_load_n(&g_clock_ticks, __ATOMIC_RELAXED);
     const uint64_t mmio = nc_mmio_total();
-    uint64_t held_ns, held_max_ns;
-    const unsigned holds = nc_ke_held(&held_ns, &held_max_ns);  /* the guest's time left out */
+    uint64_t held_out_ns, held_max_ns;
+    const unsigned holds = nc_ke_held(&held_out_ns, &held_max_ns);  /* in the window, not per s */
     nc_log("hakuX-native-stats",
            "per s: kcalls %.0f sysops %.0f (int %.0f, of them ticks %.0f; hook %.0f) schedules %.0f switches %.0f idle %.0f "
            "slices %.0f page faults %.0f mmio %.0f apu waits %.0f vm pages +%.0f -%.0f "
-           "isr%s | dpc max wait %.1f run %.1f ms, %llu over 8 ms | held %.0f, %.1f ms (max %.1f) |%s",
+           "isr%s | dpc max wait %.1f run %.1f ms, %llu over 8 ms | holds %u (longest %.1f ms), %.1f ms left out |%s",
            g_kcalls / s, g_sysops / s, g_sysop_kind[NC_SYSOP_INTERRUPT] / s, (double)(ticks - ticks_seen) / s,
            g_sysop_kind[NC_SYSOP_HOOK] / s,
            g_nc_sched.schedules / s, g_nc_sched.switches / s, g_nc_sched.idles / s, g_nc_sched.slices / s,
@@ -699,7 +699,7 @@ static void stats_tick(NcKernel *k)
            (double)(k->apu_spins - apu_seen) / s,
            (double)(k->vm_commits - commits_seen) / s, (double)(k->vm_decommits - decommits_seen) / s, isr,
            g_nc_sched.dpc_wait_max_ns / 1e6, g_nc_sched.dpc_run_max_ns / 1e6,
-           (unsigned long long)g_nc_sched.dpc_slow, holds / s, held_ns / 1e6 / s, held_max_ns / 1e6, top);
+           (unsigned long long)g_nc_sched.dpc_slow, holds, held_max_ns / 1e6, held_out_ns / 1e6, top);
     {
         static uint64_t cr, di, mm, ua;
         char ms[240];

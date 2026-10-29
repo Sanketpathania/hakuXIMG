@@ -790,6 +790,7 @@ static bool rpt_access(uint32_t pa)
     rpt_unlock();
     if (late) {
         const int64_t t0 = hle_now_ns();
+        hle_host_guest_hold(true);              /* the guest's time stands still meanwhile */
         while (hle_sem_trywait(&g_rpt_sem)) {
             /* posts left from an earlier wait */
         }
@@ -827,6 +828,7 @@ static bool rpt_access(uint32_t pa)
             hle_sem_timedwait(&g_rpt_sem, 2);   /* a write, or 2 ms */
         }
         __atomic_store_n(&g_rpt_waiting, 0, __ATOMIC_RELEASE);
+        hle_host_guest_hold(false);
         g_rpt.waits++;
         g_rpt.ns += (uint64_t)(hle_now_ns() - t0);
     }

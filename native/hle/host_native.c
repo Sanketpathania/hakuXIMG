@@ -42,10 +42,12 @@ void hle_host_kick(void)
     }
 }
 
-/* The guest CPU's thread alone counts its holds; RDTSC leaves them out as
- * the kernel's time does (nc_ke_hold_begin), the APU's sample count not (it
- * played on). */
+/* The guest CPU's thread alone counts its holds; RDTSC leaves out what the
+ * kernel's time does (nc_ke_hold_end), the APU's sample count not (it
+ * played on). Within a pause (its work storing into guest memory) a hold
+ * has nothing to do. */
 static unsigned g_holds;
+static bool g_hold_on;
 static uint64_t g_hold_c0;
 
 void hle_host_guest_hold(bool on)
@@ -54,13 +56,18 @@ void hle_host_guest_hold(bool on)
         return;
     }
     if (on) {
-        if (g_holds++ == 0) {
+        if (g_holds++ == 0 && (g_hold_on = nc_ke_hold_begin())) {
             g_hold_c0 = nc_cpu_host_cycles();
-            nc_ke_hold_begin();
         }
-    } else if (g_holds && --g_holds == 0) {
-        nc_cpu_cycle_offset_add(g_cpu, nc_cpu_host_cycles() - g_hold_c0);
-        nc_dev_apu_time_held(nc_ke_hold_end());
+    } else if (g_holds && --g_holds == 0 && g_hold_on) {
+        g_hold_on = false;
+        const uint64_t cycles = nc_cpu_host_cycles() - g_hold_c0;
+        uint64_t held;
+        const uint64_t out = nc_ke_hold_end(&held);
+        if (out && held) {
+            nc_cpu_cycle_offset_add(g_cpu, (uint64_t)((unsigned __int128)cycles * out / held));
+            nc_dev_apu_time_held(out);
+        }
     }
 }
 

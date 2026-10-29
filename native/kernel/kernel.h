@@ -465,12 +465,15 @@ void nc_ke_time_stale(void);
 void nc_ke_pause_begin(void);
 uint64_t nc_ke_pause_end(void);
 /* The guest's CPU held by the host on its own thread (hle_host_guest_hold):
- * the guest's time stands still between the two, as through a pause, the
- * devices going on; _end returns how long that was (ns). nc_ke_held: the
- * holds since the last call, their time left out and the longest (ns). */
-void nc_ke_hold_begin(void);
-uint64_t nc_ke_hold_end(void);
-unsigned nc_ke_held(uint64_t *ns, uint64_t *max_ns);
+ * the guest's time goes on for the hold's first 8 ms, then stands still
+ * till its end, as through a pause, the devices going on. _begin: false if
+ * the time stood still already (paused), the hold nothing to do. _end
+ * returns the time left out (ns), *held_ns how long it held. nc_ke_held:
+ * the holds since the last call, the time they left out and the longest
+ * (ns). */
+bool nc_ke_hold_begin(void);
+uint64_t nc_ke_hold_end(uint64_t *held_ns);
+unsigned nc_ke_held(uint64_t *out_ns, uint64_t *max_ns);
 /* A time in nc_ke_now_ns's terms on the host's CLOCK_MONOTONIC (a timed
  * wait's deadline): later by the time the emulation was paused or held;
  * while the time stands still, as if it went on now. */

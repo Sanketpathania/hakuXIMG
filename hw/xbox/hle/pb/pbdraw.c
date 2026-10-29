@@ -162,6 +162,9 @@ static struct {
     uint32_t rt, ds;                    /* the bound targets' object ids */
     uint32_t rt_w, rt_h;                /* the targets' physical size */
     uint32_t aa_x, aa_y;                /* their antialiasing scale (1, 2) */
+    uint32_t frame_rt, frame_aa_x, frame_aa_y;  /* the last colour target bound that
+                                                   covers the display, its antialiasing
+                                                   (swap) */
     PbObj objs[MAX_OBJS];
     unsigned nobjs;
     uint32_t made;                      /* the object last made (evict_slot) */
@@ -843,7 +846,7 @@ static bool rtlog_on(void)
     if (on < 0) {
         on = getenv("HAKUX_HLE_PB_RTLOG") != NULL;
     }
-    return on;
+    return on || g_dlog_left > 0;       /* and among the draw log's draws (debug.hakux.pbdraws) */
 }
 
 /* Target id's memory into its image, whatever was written; used: as
@@ -1058,6 +1061,13 @@ static void coh_first_write(PbObj *o, bool full);
 static bool coh_managed(const PbObj *o, uint32_t *len);
 static void coh_land_over(const PbObj *o, uint32_t len);
 
+/* A colour target that covers the display (its video mode known): one that
+ * can be D3D's back buffer, a frame the display shows (swap). */
+static bool covers_display(const PbObj *o)
+{
+    return o && g_disp_moded && g_pd.disp_w && o->d.w >= g_pd.disp_w && o->d.h >= g_pd.disp_h;
+}
+
 /* The targets the surface methods describe, bound when they changed. */
 static void sync_rt(void)
 {
@@ -1144,6 +1154,11 @@ static void sync_rt(void)
         rt_cpu_sync(rt);
         g_pd.rt_fresh = true;
         g_pd.vp_key[0] = g_pd.vp_key[1] = ~0u;
+    }
+    if (rt && covers_display(g_pd.rt_obj)) {
+        g_pd.frame_rt = rt;
+        g_pd.frame_aa_x = g_pd.aa_x;
+        g_pd.frame_aa_y = g_pd.aa_y;
     }
     /* the surface clip: the draws' viewport rect and scissor; the window
      * clip narrows the scissor */
@@ -1355,7 +1370,12 @@ static void front_stale(const PbObj *o)
 static void shown_part(const PbObj *o, uint32_t ax, uint32_t ay, uint32_t *w, uint32_t *h);
 
 /* FLIP_INCREMENT_WRITE: the frame in the colour target is done; it goes to
- * the display (D3D's vblank handler shows it there too). */
+ * the display (D3D's vblank handler shows it there too). The display scans
+ * out D3D's back buffer, whatever is bound: a target smaller than the
+ * display both ways can't be the frame, and the last one bound that covers
+ * it, drawn since the swap before, is shown instead. Double-S.T.E.A.L 2
+ * binds a 32 x 16 target after its frame, before its Present, and that went
+ * on screen, black, for every frame. */
 static void swap(void)
 {
     sync_rt();
@@ -1365,31 +1385,43 @@ static void swap(void)
     if (g_restored_display) {
         restored_display();
     }
-    coh_shown(g_pd.rt_obj);                 /* the front buffer's path keeps its memory */
+    uint32_t id = g_pd.rt, ax = g_pd.aa_x, ay = g_pd.aa_y;
+    PbObj *fo = g_pd.rt_obj;
+    if (fo && g_disp_moded && g_pd.disp_w && g_pd.disp_h && fo->d.w < g_pd.disp_w &&
+        fo->d.h < g_pd.disp_h) {
+        PbObj *f = obj_of(g_pd.frame_rt);
+        if (f && f->written > g_pd.swap_wseq) {
+            id = g_pd.frame_rt;
+            fo = f;
+            ax = g_pd.frame_aa_x;
+            ay = g_pd.frame_aa_y;
+        }
+    }
+    coh_shown(fo);                          /* the front buffer's path keeps its memory */
     /* memory the CPU wrote is the image now: nothing older to fill */
-    front_stale(rt_cpu_sync(g_pd.rt) ? NULL : g_pd.rt_obj);
+    front_stale(rt_cpu_sync(id) ? NULL : fo);
     g_pd.rt_fresh = true;
     if (rtlog_on()) {
-        hle_log("hakuX-hle-pb", "swap %llu: shows %u (clears %llu draws %llu)",
-                (unsigned long long)g_pd.swaps + 1, g_pd.rt, (unsigned long long)g_pd.clears,
+        hle_log("hakuX-hle-pb", "swap %llu: shows %u, %u bound (clears %llu draws %llu)",
+                (unsigned long long)g_pd.swaps + 1, id, g_pd.rt, (unsigned long long)g_pd.clears,
                 (unsigned long long)g_pd.draws);
     }
-    g_pd.shown_id = g_pd.rt;
+    g_pd.shown_id = id;
     __atomic_store_n(&g_pd.shown_ns, hle_now_ns(), __ATOMIC_RELAXED);
-    g_pd.shown_written = g_pd.rt_obj ? g_pd.rt_obj->written : 0;
+    g_pd.shown_written = fo ? fo->written : 0;
     HleCmdSwap *c = begin(HLE_OP_SWAP, sizeof(*c));
     c->value = hle_fe_next_value();
     c->swap_id = ++g_pd.swap_ids;
-    shown_part(g_pd.rt_obj, g_pd.aa_x, g_pd.aa_y, &c->src_w, &c->src_h);
+    shown_part(fo, ax, ay, &c->src_w, &c->src_h);
     g_pd.swaps++;
     g_pd.epoch++;
     g_pd.kick_ns = hle_now_ns();
     g_pd.vis_unsent = false;                /* a swap submits */
-    c->surf = g_pd.rt;
+    c->surf = id;
     c->dump_off = HLE_SWAP_NO_DUMP;
     hle_hitch_pb_swap(c->swap_id);          /* before the back end stamps its stages */
     hle_fe_commit();
-    const uint32_t pa = g_pd.rt_obj ? g_pd.rt_obj->d.pa : 0;
+    const uint32_t pa = fo ? fo->d.pa : 0;
     const uint32_t flipped = __atomic_exchange_n(&g_pd.flipped_pa, 0, __ATOMIC_ACQ_REL);
     uint32_t head = g_pd.pend_head;
     if (head - __atomic_load_n(&g_pd.pend_tail, __ATOMIC_ACQUIRE) < ARRAY_SIZE(g_pd.pend)) {

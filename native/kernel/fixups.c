@@ -51,13 +51,12 @@ static const uint8_t k_d3d_init_pb_wait[] = {
 
 /* D3D::BlockOnTime push-buffer fence wait:
  *   cmp eax, 0x2000            ; 3D 00 20 00 00
- *   jae +0x59                  ; 73 59 -> patched to 90 90 (nop nop)
+ *   jae +0x??                  ; 73 ?? -> patched to 90 90 (nop nop)
  *   mov eax, 0x040100          ; B8 00 01 04 00
  */
-static const uint8_t k_d3d_block_on_time[] = {
+static const uint8_t k_d3d_block_on_time_prefix[] = {
     0x3D, 0x00, 0x20, 0x00, 0x00,
-    0x73, 0x59,
-    0xB8, 0x00, 0x01, 0x04, 0x00
+    0x73
 };
 #define D3D_BOT_JAE_OFF 5
 
@@ -141,13 +140,13 @@ void nc_kernel_title_fixups(NcKernel *k, const HleXbeInfo *xbe)
             dp += sizeof(k_d3d_init_pb_wait);
         }
         const uint8_t *bp = base;
-        while ((bp = memmem(bp, (size_t)(end - bp), k_d3d_block_on_time, sizeof(k_d3d_block_on_time))) != NULL) {
+        while ((bp = memmem(bp, (size_t)(end - bp), k_d3d_block_on_time_prefix, sizeof(k_d3d_block_on_time_prefix))) != NULL) {
             const uint32_t va = s->va + (uint32_t)(bp - base) + D3D_BOT_JAE_OFF;
             uint8_t *site = nc_vm_host(k->vm, va);
             site[0] = 0x90; /* jae -> nop nop */
             site[1] = 0x90;
             nc_log("hakuX-native", "fixups: D3D BlockOnTime push-buffer wait bypassed at %08x (%s)", va, s->name);
-            bp += sizeof(k_d3d_block_on_time);
+            bp += sizeof(k_d3d_block_on_time_prefix);
         }
     }
     if (!patched) {

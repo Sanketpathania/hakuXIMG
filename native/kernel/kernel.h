@@ -362,6 +362,11 @@ uint32_t nc_kernel_code_alloc(NcKernel *k, uint32_t len);
  * hardware is pointed at the kernel (DirectSound's GP mailbox wait). */
 struct HleXbeInfo;
 void nc_kernel_title_fixups(NcKernel *k, const struct HleXbeInfo *xbe);
+/* ... and the library code a section holds (XMV's stream wait), at boot and
+ * as XeLoadSection loads one */
+void nc_kernel_section_fixups(NcKernel *k, uint32_t va, uint32_t len, const char *name);
+/* ... and over the sections a savestate's load brought (saved before a fixup) */
+void nc_kernel_loaded_fixups(NcKernel *k);
 
 /* ex.c: the console's video settings, as the dashboard keeps them: the
  * EEPROM's video flags (XC_VIDEO_FLAGS: NC_VIDEO_*) and the AV pack the

@@ -239,6 +239,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
             nc_hle_set_fatal(NC_FATAL_STATE, why);
             return false;
         }
+        nc_kernel_loaded_fixups(&c->kernel);
         nc_mods_after_load(&c->kernel, c->kernel.image_path);
         g_loaded = true;
     }

@@ -1217,6 +1217,43 @@ static void rt_first_land(bool full)
     }
 }
 
+/* A float depth buffer (CONTROL0 bit 12) holds the depth itself: D3D's range
+ * is 0 .. 1e30 for F24S8 and 0 .. 511.9375 (the format's maximum) for F16,
+ * its far plane what it sets as CLIP_MAX. The image (D32_SFLOAT) holds it
+ * over that maximum, as the shadow-buffer compares read it (psh.c k_max):
+ * the largest scale whose product with the maximum stays within 1.0, so a
+ * vertex on the far plane does not clip. Unscaled, Touge R's scene (F24S8,
+ * the far plane at 1e30) clipped or clamped to 1.0 against its clear at 0.0
+ * and failed its LESSEQUAL test: the screen black under the HUD. */
+static float zfloat_scale(bool z24)
+{
+    static float s[2];
+    if (!s[z24]) {
+        const float m = z24 ? 1.0e30f : 511.9375f;
+        float v = 1.0f / m;
+        while (m * v > 1.0f) {
+            v = nextafterf(v, 0.0f);
+        }
+        s[z24] = v;
+    }
+    return s[z24];
+}
+
+/* A float depth buffer's clear value (F24: 8-bit exponent, 16-bit mantissa;
+ * F16: 4-bit exponent biased 7, 12-bit mantissa) as the top of the depths
+ * it stands for: the NV2A tests at the format's precision, and a far-plane
+ * vertex lands on D3D's far clear, short of 1e30 by the mantissa it drops. */
+static float zfloat_clear(uint32_t v, bool z24)
+{
+    if (!v) {
+        return 0.0f;
+    }
+    uint32_t b = z24 ? (v << 7) | 0x7Fu : ((v << 11) + 0x3C000000u) | 0x7FFu;
+    float f;
+    memcpy(&f, &b, 4);
+    return isfinite(f) ? MIN(f * zfloat_scale(z24), 1.0f) : 1.0f;
+}
+
 static void clear(uint32_t flags)
 {
     sync_rt();
@@ -1243,10 +1280,10 @@ static void clear(uint32_t flags)
                    ((v >> 5) & 0x3F) * 255 / 63 << 8 | (v & 0x1F) * 255 / 31;
     }
     if (zf == 2) {
-        c->z = zfloat ? 0.0f : (zs >> 8) / 16777215.0f;
+        c->z = zfloat ? zfloat_clear(zs >> 8, true) : (zs >> 8) / 16777215.0f;
         c->stencil = zs & 0xFF;
     } else {
-        c->z = zfloat ? 0.0f : (zs & 0xFFFF) / 65535.0f;
+        c->z = zfloat ? zfloat_clear(zs & 0xFFFF, false) : (zs & 0xFFFF) / 65535.0f;
     }
     if (r.x1 > 0 || r.y1 > 0 || (uint32_t)r.x2 < g_pd.rt_w || (uint32_t)r.y2 < g_pd.rt_h) {
         c->nrects = 1;
@@ -3096,9 +3133,10 @@ static void emit(HleCmdDraw *d)
     uint32_t zf = (R(NV097_SET_SURFACE_FORMAT) >> 4) & 0xF;
     d->vsh = ff ? ff_program() : program();
     d->consts_off = c_off;
-    /* the integer formats' 2^-n, the shaders adding the rest (HLE_ZNORM_GLSL) */
-    d->zscale = (R(NV097_SET_CONTROL0) & 0x1000u) ? 1.0f : zf == 1 ? 1.0f / 65536.0f
-                                                                : 1.0f / 16777216.0f;
+    /* the integer formats' 2^-n, the shaders adding the rest (HLE_ZNORM_GLSL);
+     * a float format's own (zfloat_scale) */
+    d->zscale = (R(NV097_SET_CONTROL0) & 0x1000u) ? zfloat_scale(zf == 2) : zf == 1 ? 1.0f / 65536.0f
+                                                                           : 1.0f / 16777216.0f;
     d->ff_ubo = HLE_DRAW_NO_UBO;
     drawlog(d, ff);
     HleCmdDraw *c = begin(HLE_OP_DRAW, sizeof(*c));

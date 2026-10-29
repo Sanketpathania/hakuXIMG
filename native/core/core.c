@@ -106,6 +106,9 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     /* NC_RAM_MB=128 (debug kit size): a dev switch for memory investigations. */
     const char *mb = getenv("NC_RAM_MB");
     const uint32_t ram = mb && atoi(mb) == 128 ? 128u << 20 : NC_RAM_RETAIL;
+    /* a savestate's kernel objects are where its boot made them (KERN v3
+     * moved the pool's first range) */
+    nc_kernel_pool_for(g_loadstate[0] ? nc_kern_state_kprocess(g_loadstate) : 0);
     if (!nc_vm_init(&c->vm, ram) || !nc_kernel_init(&c->kernel, &c->vm)) {
         return boot_failed("The emulated console couldn't be set up.");
     }

@@ -165,6 +165,7 @@ static struct {
     uint32_t frame_rt, frame_aa_x, frame_aa_y;  /* the last colour target bound that
                                                    covers the display, its antialiasing
                                                    (swap) */
+    uint32_t shown_ax, shown_ay;        /* the antialiasing of the frame shown (shown_id) */
     PbObj objs[MAX_OBJS];
     unsigned nobjs;
     uint32_t made;                      /* the object last made (evict_slot) */
@@ -486,6 +487,14 @@ static bool mode_size(uint32_t cur, uint32_t *w, uint32_t *h, uint32_t *seq)
 
 static uint32_t g_mode_seen;            /* the video modes set the display followed */
 static bool g_disp_moded;               /* the display is the video mode's size (not a guess) */
+/* A savestate's display (hle_pbd_state_set), for the device of the run that
+ * loads it: a load starts the core again, and the title doesn't set its
+ * video mode again. */
+static struct {
+    uint32_t w, h;
+    bool moded;
+} g_saved_disp;
+static bool g_restored_display;         /* a savestate loaded: the display set at its first swap */
 
 /* The device, at the first render target: the display is that target's
  * size, or the video mode's (mode_sync). */
@@ -495,11 +504,21 @@ static void device(uint32_t w, uint32_t h)
         return;
     }
     uint32_t mw, mh;
-    if (mode_size(h, &mw, &mh, &g_mode_seen)) {
+    /* a mode set since a load: its lines as the state's display had them,
+     * not guessed from a target bound midway (sd_height) */
+    g_disp_moded = mode_size(g_saved_disp.h ? g_saved_disp.h : h, &mw, &mh, &g_mode_seen);
+    if (g_disp_moded) {
         w = mw;
         h = mh;
-        g_disp_moded = true;
+    } else if (g_saved_disp.w && g_saved_disp.h) {
+        w = g_saved_disp.w;
+        h = g_saved_disp.h;
+        g_disp_moded = g_saved_disp.moded;
     }
+    if (g_saved_disp.w && g_saved_disp.h) {
+        g_restored_display = false;         /* sized by the mode or the state, not a guess */
+    }
+    g_saved_disp.w = g_saved_disp.h = 0;
     HleCmdDevice *c = begin(HLE_OP_DEVICE_CREATE, sizeof(*c));
     c->disp_w = w;
     c->disp_h = h;
@@ -1062,10 +1081,12 @@ static bool coh_managed(const PbObj *o, uint32_t *len);
 static void coh_land_over(const PbObj *o, uint32_t len);
 
 /* A colour target that covers the display (its video mode known): one that
- * can be D3D's back buffer, a frame the display shows (swap). */
+ * can be D3D's back buffer, a frame the display shows (swap). Linear, as
+ * back buffers are: a swizzled reflection or glow target as large isn't. */
 static bool covers_display(const PbObj *o)
 {
-    return o && g_disp_moded && g_pd.disp_w && o->d.w >= g_pd.disp_w && o->d.h >= g_pd.disp_h;
+    return o && o->d.pitch && g_disp_moded && g_pd.disp_w && o->d.w >= g_pd.disp_w &&
+           o->d.h >= g_pd.disp_h;
 }
 
 /* The targets the surface methods describe, bound when they changed. */
@@ -1327,12 +1348,16 @@ static void front_fill(uint32_t pa, uint32_t len);
  * one, and every frame went to a 64 x 32 display stretched to the screen. A
  * boot binds the back buffer first (CreateDevice). The first frame swapped
  * after the load is the display's: its logical size (the antialiasing scale
- * off) resizes the display, once. */
-static bool g_restored_display;
-
+ * off) resizes the display, once. Only for a state without its display
+ * (v1), and not a display the video mode sized: the target bound at a swap
+ * needn't be the frame (swap), and Double-S.T.E.A.L 2's, 32 x 16, made a
+ * 32 x 16 display after a load, every frame black again. */
 static void restored_display(void)
 {
     g_restored_display = false;
+    if (g_disp_moded) {
+        return;
+    }
     const PbObj *o = g_pd.rt_obj;
     const uint32_t w = o ? o->d.w / MAX(g_pd.aa_x, 1u) : 0, h = o ? o->d.h / MAX(g_pd.aa_y, 1u) : 0;
     if (!g_pd.device || !w || !h || (w == g_pd.disp_w && h == g_pd.disp_h)) {
@@ -1407,6 +1432,8 @@ static void swap(void)
                 (unsigned long long)g_pd.draws);
     }
     g_pd.shown_id = id;
+    g_pd.shown_ax = ax;
+    g_pd.shown_ay = ay;
     __atomic_store_n(&g_pd.shown_ns, hle_now_ns(), __ATOMIC_RELAXED);
     g_pd.shown_written = fo ? fo->written : 0;
     HleCmdSwap *c = begin(HLE_OP_SWAP, sizeof(*c));
@@ -1480,7 +1507,13 @@ static void shown_part(const PbObj *o, uint32_t ax, uint32_t ay, uint32_t *w, ui
 static void present_now(uint32_t id)
 {
     const PbObj *o = obj_of(id);
+    /* the frame shown again keeps its antialiasing (a swap's frame needn't be
+     * the target bound) */
+    const uint32_t ax = id == g_pd.shown_id ? g_pd.shown_ax : id == g_pd.rt ? g_pd.aa_x : 1;
+    const uint32_t ay = id == g_pd.shown_id ? g_pd.shown_ay : id == g_pd.rt ? g_pd.aa_y : 1;
     g_pd.shown_id = id;
+    g_pd.shown_ax = ax;
+    g_pd.shown_ay = ay;
     __atomic_store_n(&g_pd.shown_ns, hle_now_ns(), __ATOMIC_RELAXED);
     g_pd.shown_written = o ? o->written : 0;
     HleCmdSwap *c = begin(HLE_OP_SWAP, sizeof(*c));
@@ -1488,7 +1521,7 @@ static void present_now(uint32_t id)
     c->swap_id = ++g_pd.swap_ids;
     c->surf = id;
     c->dump_off = HLE_SWAP_NO_DUMP;
-    shown_part(o, id == g_pd.rt ? g_pd.aa_x : 1, id == g_pd.rt ? g_pd.aa_y : 1, &c->src_w, &c->src_h);
+    shown_part(o, ax, ay, &c->src_w, &c->src_h);
     hle_hitch_pb_swap(c->swap_id);
     hle_hitch_frame(c->swap_id, HLE_FR_FLIP);   /* shown as it is set */
     hle_fe_commit();
@@ -1744,8 +1777,7 @@ void hle_pbd_overlay(bool show)
         s->swap_id = ++g_pd.swap_ids;
         s->surf = g_pd.shown_id;
         s->dump_off = HLE_SWAP_NO_DUMP;
-        shown_part(obj_of(g_pd.shown_id), g_pd.shown_id == g_pd.rt ? g_pd.aa_x : 1,
-                   g_pd.shown_id == g_pd.rt ? g_pd.aa_y : 1, &s->src_w, &s->src_h);
+        shown_part(obj_of(g_pd.shown_id), g_pd.shown_ax, g_pd.shown_ay, &s->src_w, &s->src_h);
         hle_hitch_pb_swap(s->swap_id);      /* a frame to the monitor, not a gap */
         hle_hitch_frame(s->swap_id, HLE_FR_FLIP);
         hle_fe_commit();
@@ -4932,6 +4964,12 @@ void hle_pbd_state_get(HlePbdState *s, const float **imm, const uint32_t **inl, 
     s->clears = g_pd.clears;
     s->swaps = g_pd.swaps;
     s->draws = g_pd.draws;
+    /* the display once settled: not while a load's first swap is still to
+     * size it (0, as a v1 state), and a loaded one no device took yet */
+    const bool settled = g_pd.device && !g_restored_display;
+    s->disp_w = settled ? g_pd.disp_w : g_pd.device ? 0 : g_saved_disp.w;
+    s->disp_h = settled ? g_pd.disp_h : g_pd.device ? 0 : g_saved_disp.h;
+    s->disp_moded = settled ? g_disp_moded : !g_pd.device && g_saved_disp.moded;
     *imm = g_pd.imm;
     *inl = g_pd.inl;
     *idx = g_pd.idx;
@@ -4970,5 +5008,12 @@ bool hle_pbd_state_set(const HlePbdState *s, const float *imm, const uint32_t *i
     g_pd.ffgen++;
     g_pd.st_sent = false;
     hle_pbd_restored();
+    /* the display the state's device had (v2): the device made at the next
+     * bind takes it, or the first swap (restored_display), not the target
+     * bound then */
+    const bool ok = s->disp_w && s->disp_h && s->disp_w <= 4096 && s->disp_h <= 4096;  /* as sync_rt */
+    g_saved_disp.w = ok ? s->disp_w : 0;
+    g_saved_disp.h = ok ? s->disp_h : 0;
+    g_saved_disp.moded = ok && s->disp_moded;
     return true;
 }

@@ -43,3 +43,8 @@ One entry per section version (tools/native/statelock.py).
 ## NIC v1 (2026-10-26, after a7063de469)
 
 - first version
+
+## PBD v2 (2026-10-29, after d44f6d0fe3)
+
+- HlePbdState.disp_w, disp_h, disp_moded: the device's display and whether the video mode sized it, for the run that loads the state (the title doesn't set its mode again); v1 states: 0, the display from the first frame swapped as before
+- upgraded: v1..v1 states load

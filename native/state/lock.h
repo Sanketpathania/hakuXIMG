@@ -39,9 +39,9 @@
 #define NC_STATE_V_PAGE 1
 #define NC_STATE_MIN_PAGE 1
 #define NC_STATE_H_PAGE 0x29486b30u
-#define NC_STATE_V_PBD 1
+#define NC_STATE_V_PBD 2
 #define NC_STATE_MIN_PBD 1
-#define NC_STATE_H_PBD 0x0db3a77bu
+#define NC_STATE_H_PBD 0x2f95ca51u
 #define NC_STATE_V_RAM 1
 #define NC_STATE_MIN_RAM 1
 #define NC_STATE_H_RAM 0x27b90541u

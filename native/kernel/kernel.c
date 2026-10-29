@@ -1473,8 +1473,10 @@ static void slow_sysop(NcKernel *k, enum NcSysOp op, uint32_t eip, uint16_t ordi
 
 void nc_kernel_set_paused(NcKernel *k, bool on)
 {
-    nc_log("hakuX-native", "%s requested (the activity: paused, or its menu open)", on ? "pause" : "resume");
-    nc_pause_set(on);
+    (void)k;
+    (void)on;
+    // nc_log("hakuX-native", "%s requested (the activity: paused, or its menu open)", on ? "pause" : "resume");
+    // nc_pause_set(on);
 }
 
 /* The emulation pauses with the activity (the device suspends, another app

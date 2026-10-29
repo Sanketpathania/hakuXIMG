@@ -86,6 +86,7 @@ typedef struct HleCaps {
     bool host_query_reset, occl_precise;        /* visibility tests */
     bool wide_lines;            /* enabled when present: every pipeline draws 1.0-wide
                                    lines (Turnip on the Adreno 650 has none) */
+    bool large_points;          /* enabled when present: point sizes > 1.0 */
     bool cache_control;         /* pipelineCreationCacheControl: a pipeline asked of the
                                    cache only (vk/draw.c, asynchronous builds) */
     bool swapchain;             /* the Android surface and VK_KHR_swapchain: the window's

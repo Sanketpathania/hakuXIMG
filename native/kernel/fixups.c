@@ -33,6 +33,34 @@ static const uint8_t k_mailbox_wait[] = {0x05, 0x00, 0x08, 0x00, 0x00,  /* add e
                                          0x75, 0xFA};                   /* jne the cmp */
 #define LOOP_OFF 5 /* the cmp */
 
+/* D3D8 CDevice::Init push-buffer idle check after KickOff:
+ *   mov eax, [ecx+0x44]        ; 8B 41 44 (NV_USER_DMA_GET)
+ *   mov edx, [ebp+0x00]        ; 8B 55 00 (m_pPut)
+ *   xor edx, eax               ; 33 D0
+ *   test edx, 0x0FFFFFFF       ; F7 C2 FF FF FF 0F
+ *   je  +0x33                  ; 74 33 -> patched to EB 33 (jmp)
+ */
+static const uint8_t k_d3d_init_pb_wait[] = {
+    0x8B, 0x41, 0x44,
+    0x8B, 0x55, 0x00,
+    0x33, 0xD0,
+    0xF7, 0xC2, 0xFF, 0xFF, 0xFF, 0x0F,
+    0x74, 0x33
+};
+#define D3D_INIT_JE_OFF 14
+
+/* D3D::BlockOnTime push-buffer fence wait:
+ *   cmp eax, 0x2000            ; 3D 00 20 00 00
+ *   jae +0x59                  ; 73 59 -> patched to 90 90 (nop nop)
+ *   mov eax, 0x040100          ; B8 00 01 04 00
+ */
+static const uint8_t k_d3d_block_on_time[] = {
+    0x3D, 0x00, 0x20, 0x00, 0x00,
+    0x73, 0x59,
+    0xB8, 0x00, 0x01, 0x04, 0x00
+};
+#define D3D_BOT_JAE_OFF 5
+
 static bool apu_spin_on(void)
 {
     char v[PROP_VALUE_MAX] = "";
@@ -103,6 +131,23 @@ void nc_kernel_title_fixups(NcKernel *k, const HleXbeInfo *xbe)
                        va, s->name, stub);
             }
             p += sizeof(k_mailbox_wait);
+        }
+        const uint8_t *dp = base;
+        while ((dp = memmem(dp, (size_t)(end - dp), k_d3d_init_pb_wait, sizeof(k_d3d_init_pb_wait))) != NULL) {
+            const uint32_t va = s->va + (uint32_t)(dp - base) + D3D_INIT_JE_OFF;
+            uint8_t *site = nc_vm_host(k->vm, va);
+            site[0] = 0xEB; /* je -> jmp */
+            nc_log("hakuX-native", "fixups: D3D CDevice::Init push-buffer wait bypassed at %08x (%s)", va, s->name);
+            dp += sizeof(k_d3d_init_pb_wait);
+        }
+        const uint8_t *bp = base;
+        while ((bp = memmem(bp, (size_t)(end - bp), k_d3d_block_on_time, sizeof(k_d3d_block_on_time))) != NULL) {
+            const uint32_t va = s->va + (uint32_t)(bp - base) + D3D_BOT_JAE_OFF;
+            uint8_t *site = nc_vm_host(k->vm, va);
+            site[0] = 0x90; /* jae -> nop nop */
+            site[1] = 0x90;
+            nc_log("hakuX-native", "fixups: D3D BlockOnTime push-buffer wait bypassed at %08x (%s)", va, s->name);
+            bp += sizeof(k_d3d_block_on_time);
         }
     }
     if (!patched) {

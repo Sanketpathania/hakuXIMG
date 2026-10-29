@@ -375,6 +375,7 @@ static int kelvin(uint32_t m, uint32_t v)
                 hle_host_mem_set_dirty(pa, 4);
                 g_pb.sem_releases++;
             }
+            publish_get();
         }
         break;
     default:
@@ -758,6 +759,7 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
         } else {
             g_pb.trap_other++;
         }
+        publish_get();
         hle_host_gpu_irq_update();
         return HLE_PB_STALL;
     }
@@ -1477,6 +1479,14 @@ void hle_pb_debug_pos(uint32_t *get, uint32_t *put)
 {
     *get = g_pb.p.get;
     *put = hle_host_gpu_reg(NV_PFIFO_CACHE1_DMA_PUT);
+}
+
+uint32_t hle_pb_live_get(void)
+{
+    if (!g_pb.on || !g_pb.synced) {
+        return hle_host_gpu_reg(NV_PFIFO_CACHE1_DMA_GET);
+    }
+    return __atomic_load_n(&g_pb.p.get, __ATOMIC_RELAXED);
 }
 
 void hle_pb_kick(void)

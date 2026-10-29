@@ -55,6 +55,22 @@ static bool not_adreno(const HleDriver *d)
     return !qualcomm_proprietary(d) && !mesa_turnip(d);
 }
 
+/* PowerVR hardware, any driver (vendor 0x1010 or VK_DRIVER_ID_IMAGINATION_PROPRIETARY) */
+static bool powervr(const HleDriver *d)
+{
+    return d->props.vendorID == 0x1010 || d->drv.driverID == VK_DRIVER_ID_IMAGINATION_PROPRIETARY;
+}
+
+static bool powervr_or_arm_proprietary(const HleDriver *d)
+{
+    return powervr(d) || arm_proprietary(d);
+}
+
+static bool powervr_or_mali(const HleDriver *d)
+{
+    return powervr(d) || mali(d);
+}
+
 /* PowerVR (vendor 0x1010) before driver 0x00582558 (ARMSX2's and PPSSPP's bound) */
 static bool powervr_old(const HleDriver *d)
 {
@@ -89,11 +105,11 @@ static const HleQuirk k_quirks[] = {
     { HLE_QUIRK_BLEND_CONST_RESET, "blend_const_reset", mesa_turnip },
     /* ARMSX2 (GSDeviceVK.cpp): "Arm's Mali blob crashes in
      * vkCmdPushDescriptorSetKHR even where it advertises the extension" */
-    { HLE_QUIRK_NO_PUSH_DESC, "no_push_desc", arm_proprietary },
-    /* ARMSX2 after PPSSPP: depth vs stencil load ops that differ corrupt on Mali */
-    { HLE_QUIRK_DS_SAME_LOAD, "ds_same_load", mali },
+    { HLE_QUIRK_NO_PUSH_DESC, "no_push_desc", powervr_or_arm_proprietary },
+    /* ARMSX2 after PPSSPP: depth vs stencil load ops that differ corrupt on Mali/PowerVR */
+    { HLE_QUIRK_DS_SAME_LOAD, "ds_same_load", powervr_or_mali },
     /* ARMSX2 (tfx.glsl GPU_PROFILE_MALI) after PPSSPP's EQUAL_WZ_CORRUPTS_DEPTH */
-    { HLE_QUIRK_Z_EQ_W, "z_eq_w", mali },
+    { HLE_QUIRK_Z_EQ_W, "z_eq_w", powervr_or_mali },
     { HLE_QUIRK_FRESH_CLEAR, "fresh_clear", not_adreno },
     /* ARMSX2 (VKSwapChain.cpp) after PPSSPP: older PowerVR swapchain widths */
     { HLE_QUIRK_SWAP_W32, "swap_w32", powervr_old },

@@ -60,5 +60,7 @@ bool hle_pb_flip_waiting(void);
 void hle_pb_diag(void);
 /* debug (the decode thread): the decoder's GET and the guest's PUT */
 void hle_pb_debug_pos(uint32_t *get, uint32_t *put);
+/* The live GET position of the pusher */
+uint32_t hle_pb_live_get(void);
 
 #endif

@@ -68,6 +68,8 @@
     <!-- The core: libhakuxcore.so on SDL3, in its own process. -->
     <activity
       android:name=".NativeCoreActivity"
+      android:showWhenLocked="true"
+      android:turnScreenOn="true"
       android:theme="@style/Theme.HakuX.Game"
       android:screenOrientation="sensorLandscape"
       android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"

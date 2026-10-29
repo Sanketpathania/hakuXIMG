@@ -443,7 +443,7 @@ int hle_vk_init(void)
     c->floor_ok = true;
     need(c, v->qfam != UINT32_MAX, "graphics queue");
     c->wide_lines = q.features.wideLines;
-    need(c, q.features.largePoints, "largePoints");
+    c->large_points = q.features.largePoints;
     c->depth_clamp = q.features.depthClamp;
     need(c, ok_tl, "timelineSemaphore");
     /* the bindless set: its arrays indexed nonuniformEXT, written while bound */
@@ -610,7 +610,7 @@ int hle_vk_init(void)
     VkPhysicalDevicePipelineCreationCacheControlFeatures f_pcc = {
         .sType = q_pcc.sType, .pipelineCreationCacheControl = VK_TRUE };
     f.features.wideLines = c->wide_lines;
-    f.features.largePoints = VK_TRUE;
+    f.features.largePoints = c->large_points;
     f.features.depthClamp = c->depth_clamp;
     f.features.shaderSampledImageArrayDynamicIndexing = !c->bindless;
     f.features.logicOp = q.features.logicOp;

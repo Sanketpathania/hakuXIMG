@@ -74,9 +74,10 @@ static uint64_t coarse_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-/* The emulation paused (nc_kernel_pause_point): the guest's time stops where
- * the pause began and goes on from there, the time paused left out (g_off,
- * host ns). A seqlock: the guest's CPU writes, any thread reads. */
+/* The emulation paused (nc_kernel_pause_point), or the guest's CPU held by
+ * the host (nc_ke_hold_begin): the guest's time stops where that began and
+ * goes on from there, the time between left out (g_off, host ns). A seqlock:
+ * the guest's CPU writes, any thread reads. */
 static uint32_t g_tseq;
 static bool g_tpaused;
 static uint64_t g_tpause_raw, g_off;
@@ -88,7 +89,9 @@ static uint64_t raw_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-static uint64_t guest_of_raw(uint64_t raw)
+/* The time's state, read whole: whether it stands still, since when (host
+ * ns), the time left out so far */
+static bool time_read(uint64_t *pause_raw, uint64_t *off)
 {
     for (;;) {
         const uint32_t s = __atomic_load_n(&g_tseq, __ATOMIC_ACQUIRE);
@@ -96,13 +99,19 @@ static uint64_t guest_of_raw(uint64_t raw)
             continue;                   /* the guest's CPU is writing it */
         }
         const bool p = __atomic_load_n(&g_tpaused, __ATOMIC_RELAXED);
-        const uint64_t pr = __atomic_load_n(&g_tpause_raw, __ATOMIC_RELAXED);
-        const uint64_t off = __atomic_load_n(&g_off, __ATOMIC_RELAXED);
+        *pause_raw = __atomic_load_n(&g_tpause_raw, __ATOMIC_RELAXED);
+        *off = __atomic_load_n(&g_off, __ATOMIC_RELAXED);
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         if (__atomic_load_n(&g_tseq, __ATOMIC_RELAXED) == s) {
-            return (p ? pr : raw) - off;
+            return p;
         }
     }
+}
+
+static uint64_t guest_of_raw(uint64_t raw)
+{
+    uint64_t pr, off;
+    return (time_read(&pr, &off) ? pr : raw) - off;
 }
 
 static void time_write(bool paused)
@@ -131,6 +140,34 @@ uint64_t nc_ke_pause_end(void)
     return g_off - was;
 }
 
+/* The holds' time left out, for the stats (the guest's CPU's thread alone) */
+static uint64_t g_held_ns, g_held_max_ns;
+static unsigned g_holds;
+
+void nc_ke_hold_begin(void)
+{
+    time_write(true);
+}
+
+uint64_t nc_ke_hold_end(void)
+{
+    const uint64_t ns = nc_ke_pause_end();
+    g_held_ns += ns;
+    g_held_max_ns = ns > g_held_max_ns ? ns : g_held_max_ns;
+    g_holds++;
+    return ns;
+}
+
+unsigned nc_ke_held(uint64_t *ns, uint64_t *max_ns)
+{
+    const unsigned n = g_holds;
+    *ns = g_held_ns;
+    *max_ns = g_held_max_ns;
+    g_held_ns = g_held_max_ns = 0;
+    g_holds = 0;
+    return n;
+}
+
 void nc_ke_state(uint64_t *boot_ns, uint64_t *time_offset, uint64_t *guest_ns)
 {
     *boot_ns = g_boot_ns;
@@ -154,7 +191,15 @@ void nc_ke_state_set(uint64_t boot_ns, uint64_t time_offset, uint64_t guest_ns)
 
 uint64_t nc_ke_host_ns(uint64_t guest_ns)
 {
-    return guest_ns + __atomic_load_n(&g_off, __ATOMIC_RELAXED);
+    uint64_t pr, off;
+    if (!time_read(&pr, &off)) {
+        return guest_ns + off;
+    }
+    /* standing still: when it comes if the time goes on now (a deadline
+     * from the time that went on, past now, had a thread spin through a
+     * hold) */
+    const uint64_t now = pr - off;
+    return raw_ns() + (guest_ns > now ? guest_ns - now : 0);
 }
 
 uint64_t nc_ke_now_ns(void)

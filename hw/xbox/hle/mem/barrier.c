@@ -898,6 +898,7 @@ void hle_mem_stale_access_rw(uint32_t pa, bool write)
         const uint32_t gen = g_na[i].gen;
         uint64_t v = g_na[i].v;
         stale_unlock();
+        hle_host_guest_hold(true);              /* the fill and the wait: the guest's time stands still */
         uint64_t (*fill)(uint32_t, uint32_t, bool) = __atomic_load_n(&g_guard_fill, __ATOMIC_ACQUIRE);
         if (!v && fill) {
             v = fill(lo, len, !write);
@@ -909,6 +910,7 @@ void hle_mem_stale_access_rw(uint32_t pa, bool write)
             }
             g_wait(v);
         }
+        hle_host_guest_hold(false);
         stale_lock();
         const int j = na_find_kind(lo, len, true);
         if (j >= 0 && g_na[j].gen == gen) {
@@ -931,7 +933,9 @@ void hle_mem_stale_access_rw(uint32_t pa, bool write)
     __atomic_store_n(&g_stale, 0, __ATOMIC_RELEASE);
     stale_unlock();
     /* the image into the memory, then the wait for the copy (the guest's
-     * thread is the only one that touches guest memory through its views) */
+     * thread is the only one that touches guest memory through its views),
+     * the guest's time standing still */
+    hle_host_guest_hold(true);
     __atomic_load_n(&g_stale_fill, __ATOMIC_ACQUIRE)(lo, len);
     const uint64_t v = hle_pageuse_get(&g_pu, lo, len);
     if (g_completed && v > g_completed()) {
@@ -941,6 +945,7 @@ void hle_mem_stale_access_rw(uint32_t pa, bool write)
         }
         g_wait(v);
     }
+    hle_host_guest_hold(false);
 }
 
 void hle_barrier_arm_landing(uint32_t pa, uint32_t len, uint64_t value)
@@ -1009,7 +1014,9 @@ uint64_t hle_mem_write_fence(uint32_t pa, uint32_t len)
 void hle_mem_wait_fence(uint64_t value)
 {
     if (value && g_wait) {
+        hle_host_guest_hold(true);
         g_wait(value);
+        hle_host_guest_hold(false);
     }
 }
 
@@ -1050,11 +1057,13 @@ void hle_mem_first_write(uint64_t ram_addr, unsigned size)
         int64_t t0 = hle_now_ns();
         g_st.waits++;
         g_wpages[g_nwpages++ % 8] = pa >> 12;
+        hle_host_guest_hold(true);              /* the guest's time stands still meanwhile */
         void (*flush)(uint64_t) = __atomic_load_n(&g_flush, __ATOMIC_ACQUIRE);
         if (flush) {
             flush(v);
         }
         g_wait(v);
+        hle_host_guest_hold(false);
         g_st.wait_ns += hle_now_ns() - t0;
         if (g_contended) {
             __atomic_fetch_or(&g_contended[(pa >> 12) >> 5], 1u << ((pa >> 12) & 31),

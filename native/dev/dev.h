@@ -39,6 +39,10 @@ void nc_dev_apu_init(struct NcVm *vm);
  * at host address word to clear): the APU runs its frames to completion
  * meanwhile; returns when the word clears or after about a millisecond. */
 void nc_dev_apu_spin_wait(const uint32_t *word);
+/* The guest's time left out ns while the guest's CPU was held (host.h
+ * hle_host_guest_hold), the APU playing on: its sample counter goes on
+ * with it. */
+void nc_dev_apu_time_held(uint64_t ns);
 /* aci.c: the AC'97 audio codec interface (0xFEC00000, IRQ 6). */
 void nc_dev_aci_init(struct NcVm *vm);
 /* nvnet.c: the Ethernet controller (0xFEF00000, IRQ 4) and its link state for

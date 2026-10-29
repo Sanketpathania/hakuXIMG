@@ -1014,6 +1014,7 @@ static void catch_up(void)
         return;
     }
     const int64_t t0 = hle_now_ns();
+    hle_host_guest_hold(true);              /* the guest's time stands still meanwhile */
     while (hle_sem_trywait(&g_cu.sem)) {
         /* a post that came as an earlier wait timed out */
     }
@@ -1050,6 +1051,7 @@ static void catch_up(void)
         }
     }
     __atomic_store_n(&g_cu.state, 0, __ATOMIC_RELEASE);
+    hle_host_guest_hold(false);
     g_cu.ns += (uint64_t)(hle_now_ns() - t0);
     __atomic_fetch_add(&g_cu.waits, 1, __ATOMIC_RELAXED);
 }

@@ -34,6 +34,15 @@ typedef struct HleCpu {
 HleCpu *hle_host_cpu(void);
 /* Makes the guest CPU leave its JIT code at the next block. */
 void hle_host_kick(void);
+/* The guest's CPU waits on its own thread for the host (on: from here; off:
+ * to here; nested), for GPU work or the decoder at a store or an access the
+ * HLE holds: the guest's time (its clocks, its timers) stands still
+ * meanwhile, as if that work had been done at once, since the guest takes
+ * no interrupt while it waits. A title timing itself with them (Def Jam:
+ * Fight for NY's 60 Hz D3D timer callback, re-armed for its period less how
+ * late it came) saw one come later than its period, asked for a time
+ * already past, and its logic stopped for good. Other threads: nothing. */
+void hle_host_guest_hold(bool on);
 /* The JIT's code for guest code is stale (probes changed). */
 void hle_host_code_changed(void);
 /* How many times hle_host_code_changed took effect (diagnostics). */

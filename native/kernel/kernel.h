@@ -464,8 +464,16 @@ void nc_ke_time_stale(void);
  * time stands still between the two; _end returns how long that was (ns). */
 void nc_ke_pause_begin(void);
 uint64_t nc_ke_pause_end(void);
+/* The guest's CPU held by the host on its own thread (hle_host_guest_hold):
+ * the guest's time stands still between the two, as through a pause, the
+ * devices going on; _end returns how long that was (ns). nc_ke_held: the
+ * holds since the last call, their time left out and the longest (ns). */
+void nc_ke_hold_begin(void);
+uint64_t nc_ke_hold_end(void);
+unsigned nc_ke_held(uint64_t *ns, uint64_t *max_ns);
 /* A time in nc_ke_now_ns's terms on the host's CLOCK_MONOTONIC (a timed
- * wait's deadline): later by the time the emulation was paused. */
+ * wait's deadline): later by the time the emulation was paused or held;
+ * while the time stands still, as if it went on now. */
 uint64_t nc_ke_host_ns(uint64_t guest_ns);
 /* The activity paused or resumed (NativeCoreActivity): see nc_pause_set. */
 void nc_kernel_set_paused(NcKernel *k, bool on);

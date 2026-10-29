@@ -5,6 +5,7 @@
  * is dirty.c's, the GPU device's interrupts and display timing dev/nv2a.c's.
  */
 #include "native/hle/hle_native.h"
+#include "native/dev/dev.h"
 
 #include "hw/xbox/hle/host.h"
 
@@ -38,6 +39,28 @@ void hle_host_kick(void)
 {
     if (g_cpu) {
         nc_cpu_request_interrupt(g_cpu); /* leave the JIT at the next block */
+    }
+}
+
+/* The guest CPU's thread alone counts its holds; RDTSC leaves them out as
+ * the kernel's time does (nc_ke_hold_begin), the APU's sample count not (it
+ * played on). */
+static unsigned g_holds;
+static uint64_t g_hold_c0;
+
+void hle_host_guest_hold(bool on)
+{
+    if (!g_cpu || !nc_irq_cpu_thread()) {
+        return;
+    }
+    if (on) {
+        if (g_holds++ == 0) {
+            g_hold_c0 = nc_cpu_host_cycles();
+            nc_ke_hold_begin();
+        }
+    } else if (g_holds && --g_holds == 0) {
+        nc_cpu_cycle_offset_add(g_cpu, nc_cpu_host_cycles() - g_hold_c0);
+        nc_dev_apu_time_held(nc_ke_hold_end());
     }
 }
 

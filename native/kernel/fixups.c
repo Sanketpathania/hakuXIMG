@@ -33,14 +33,19 @@ static const uint8_t k_mailbox_wait[] = {0x05, 0x00, 0x08, 0x00, 0x00,  /* add e
                                          0x75, 0xFA};                   /* jne the cmp */
 #define LOOP_OFF 5 /* the cmp */
 
-/* D3D8 CDevice::Init push-buffer idle check after KickOff:
- *   test edx, 0x0FFFFFFF       ; F7 C2 FF FF FF 0F (matches across XDK builds)
+/* D3D8 CDevice::Init push-buffer idle checks after KickOff:
+ *   test edx, 0x0FFFFFFF       ; F7 C2 FF FF FF 0F (Ninja Gaiden, NFS MW, Halo)
+ *   test ecx, 0x0FFFFFFF       ; F7 C1 FF FF FF 0F (Halo secondary KickOff)
+ * Following instruction:
  *   je  +offset                ; 74 ?? -> patched to EB ?? (jmp)
+ *   pop reg; je +offset        ; 58..5F 74 ?? -> pop kept, patched to pop reg; EB ?? (jmp)
  */
-static const uint8_t k_d3d_init_pb_wait[] = {
+static const uint8_t k_d3d_init_pb_wait_edx[] = {
     0xF7, 0xC2, 0xFF, 0xFF, 0xFF, 0x0F
 };
-#define D3D_INIT_JE_OFF 6
+static const uint8_t k_d3d_init_pb_wait_ecx[] = {
+    0xF7, 0xC1, 0xFF, 0xFF, 0xFF, 0x0F
+};
 
 /* D3D::BlockOnTime push-buffer fence wait:
  *   cmp eax, 0x2000            ; 3D 00 20 00 00
@@ -125,13 +130,22 @@ void nc_kernel_title_fixups(NcKernel *k, const HleXbeInfo *xbe)
             }
             p += sizeof(k_mailbox_wait);
         }
-        const uint8_t *dp = base;
-        while ((dp = memmem(dp, (size_t)(end - dp), k_d3d_init_pb_wait, sizeof(k_d3d_init_pb_wait))) != NULL) {
-            const uint32_t va = s->va + (uint32_t)(dp - base) + D3D_INIT_JE_OFF;
-            uint8_t *site = nc_vm_host(k->vm, va);
-            site[0] = 0xEB; /* je -> jmp */
-            nc_log("hakuX-native", "fixups: D3D CDevice::Init push-buffer wait bypassed at %08x (%s)", va, s->name);
-            dp += sizeof(k_d3d_init_pb_wait);
+        const uint8_t *needles[] = {k_d3d_init_pb_wait_edx, k_d3d_init_pb_wait_ecx};
+        for (unsigned n = 0; n < sizeof(needles) / sizeof(needles[0]); n++) {
+            const uint8_t *dp = base;
+            while ((dp = memmem(dp, (size_t)(end - dp), needles[n], 6)) != NULL) {
+                uint32_t off = 6;
+                if (dp + off < end && dp[off] >= 0x58 && dp[off] <= 0x5F) {
+                    off++; /* preserve pop reg instruction (e.g. pop edi in Halo) */
+                }
+                if (dp + off < end && dp[off] == 0x74) {
+                    const uint32_t va = s->va + (uint32_t)(dp - base) + off;
+                    uint8_t *site = nc_vm_host(k->vm, va);
+                    site[0] = 0xEB; /* je -> jmp */
+                    nc_log("hakuX-native", "fixups: D3D CDevice::Init push-buffer wait bypassed at %08x (%s)", va, s->name);
+                }
+                dp += 6;
+            }
         }
         const uint8_t *bp = base;
         while ((bp = memmem(bp, (size_t)(end - bp), k_d3d_block_on_time_prefix, sizeof(k_d3d_block_on_time_prefix))) != NULL) {

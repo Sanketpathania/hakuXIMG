@@ -34,20 +34,13 @@ static const uint8_t k_mailbox_wait[] = {0x05, 0x00, 0x08, 0x00, 0x00,  /* add e
 #define LOOP_OFF 5 /* the cmp */
 
 /* D3D8 CDevice::Init push-buffer idle check after KickOff:
- *   mov eax, [ecx+0x44]        ; 8B 41 44 (NV_USER_DMA_GET)
- *   mov edx, [ebp+0x00]        ; 8B 55 00 (m_pPut)
- *   xor edx, eax               ; 33 D0
- *   test edx, 0x0FFFFFFF       ; F7 C2 FF FF FF 0F
- *   je  +0x33                  ; 74 33 -> patched to EB 33 (jmp)
+ *   test edx, 0x0FFFFFFF       ; F7 C2 FF FF FF 0F (matches across XDK builds)
+ *   je  +offset                ; 74 ?? -> patched to EB ?? (jmp)
  */
 static const uint8_t k_d3d_init_pb_wait[] = {
-    0x8B, 0x41, 0x44,
-    0x8B, 0x55, 0x00,
-    0x33, 0xD0,
-    0xF7, 0xC2, 0xFF, 0xFF, 0xFF, 0x0F,
-    0x74, 0x33
+    0xF7, 0xC2, 0xFF, 0xFF, 0xFF, 0x0F
 };
-#define D3D_INIT_JE_OFF 14
+#define D3D_INIT_JE_OFF 6
 
 /* D3D::BlockOnTime push-buffer fence wait:
  *   cmp eax, 0x2000            ; 3D 00 20 00 00
@@ -111,11 +104,12 @@ void nc_kernel_title_fixups(NcKernel *k, const HleXbeInfo *xbe)
     unsigned patched = 0;
     for (unsigned i = 0; i < xbe->nsections; i++) {
         const HleXbeSection *s = &xbe->sections[i];
-        if (!s->vsize || !section_mapped(k->vm, s->va, s->vsize)) {
+        const uint32_t scan_len = s->raw_size ? s->raw_size : s->vsize;
+        if (!scan_len || !section_mapped(k->vm, s->va, scan_len)) {
             continue; /* not loaded at boot */
         }
         const uint8_t *base = nc_vm_host(k->vm, s->va);
-        const uint8_t *p = base, *end = base + s->vsize;
+        const uint8_t *p = base, *end = base + scan_len;
         while ((p = memmem(p, (size_t)(end - p), k_mailbox_wait, sizeof(k_mailbox_wait))) != NULL) {
             const uint32_t va = s->va + (uint32_t)(p - base) + LOOP_OFF;
             const uint32_t stub = mailbox_stub(k, va);

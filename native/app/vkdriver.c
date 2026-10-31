@@ -59,9 +59,9 @@ static bool driver_is_mesa(const char *dir)
  * debug.hakux.kgslprio: another priority (1..15), 0 for the driver's own. */
 static int kgsl_priority(const char *dir)
 {
-    /* KGSL only: the pack's vendor says "Mesa" for Turnip, which is also
-     * built for Mali devices (malisx2 is not "Mesa", and a Mali pack has
-     * nothing to set here anyway). */
+    /* KGSL only: the pack's vendor says "Mesa" for Turnip and for Mesa's
+     * Mali driver (PanVK) alike, and a Mali phone has no kgsl contexts to
+     * set (malisx2 is not "Mesa" either). */
     if (!driver_is_mesa(dir) || access("/dev/kgsl-3d0", F_OK) != 0) {
         return -1;
     }

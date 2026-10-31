@@ -39,6 +39,31 @@ static bool arm_proprietary(const HleDriver *d)
     return d->drv.driverID == VK_DRIVER_ID_ARM_PROPRIETARY;
 }
 
+/* Arm's driver release, from its driverInfo ("v1.r34p0-01eac0.<build>": 34);
+ * 0 for another driver or info that names none */
+static unsigned arm_release(const HleDriver *d)
+{
+    const char *r = arm_proprietary(d) ? d->drv.driverInfo : NULL;
+    while (r && (r = strstr(r, ".r")) != NULL) {
+        unsigned n = 0;
+        for (r += 2; *r >= '0' && *r <= '9' && n < 1000; r++) {
+            n = n * 10 + (unsigned)(*r - '0');
+        }
+        if (n && *r == 'p') {
+            return n;
+        }
+    }
+    return 0;
+}
+
+/* Arm's driver before r40: its host wait on a timeline semaphore loses the
+ * device (no_sem_wait) */
+static bool arm_before_r40(const HleDriver *d)
+{
+    const unsigned r = arm_release(d);
+    return r && r < 40;
+}
+
 /* Mali hardware, any driver (vendor 0x13B5: Arm's, PanVK) */
 static bool mali(const HleDriver *d)
 {
@@ -154,9 +179,16 @@ static const HleQuirk k_quirks[] = {
      * titles and at random moments, while the GPU had run everything up to
      * the call. The counter query never failed, so the waits poll it
      * (hle_tl_sem_wait): no loss in ~40 minutes of play after, where before
-     * a session lost the device several times. Seen on this build only, so
-     * on for this GPU only; HAKUX_HLE_QUIRKS=+no_sem_wait tries it elsewhere. */
-    { HLE_QUIRK_NO_SEM_WAIT, "no_sem_wait", mali_g52_arm },
+     * a session lost the device several times. The watcher's wait, for a
+     * value already submitted (back.c counts it after vkQueueSubmit2), lost
+     * it too: not a wait before its signal. Mali-G57, the same r34p0 (a
+     * Galaxy A03 user's diag log, 2026-10-26): JSRF lost the device at its
+     * title screen in every run the same way, in the decoder's wait, every
+     * submitted command buffer done and the GPU idle for 251 ms. r40p0 (the
+     * RG556's, no_wbuf above) and r54p1 (the X6858's) ran without it and the
+     * releases between are untested, so on for Arm's driver before r40;
+     * HAKUX_HLE_QUIRKS=+no_sem_wait tries it elsewhere. */
+    { HLE_QUIRK_NO_SEM_WAIT, "no_sem_wait", arm_before_r40 },
 };
 
 static uint32_t g_defaults;

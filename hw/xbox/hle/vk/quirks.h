@@ -93,8 +93,8 @@ enum {
      * VK_ERROR_DEVICE_LOST and takes the session down, while the counter
      * query (vkGetSemaphoreCounterValue) keeps working: the waits poll the
      * counter in userspace instead (hle_tl_sem_wait, vk/timeline.c). On for
-     * the Mali-G52 under Arm's driver, whose r34p0 build lost the device
-     * this way mid-game, across titles. */
+     * Arm's driver before r40, whose r34p0 lost the device this way on a
+     * Mali-G52 (mid-game, across titles) and on a Mali-G57 (JSRF). */
     HLE_QUIRK_NO_SEM_WAIT = 1u << 14,
 };
 

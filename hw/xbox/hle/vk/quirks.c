@@ -34,11 +34,6 @@ static bool mesa_turnip(const HleDriver *d)
     return d->drv.driverID == VK_DRIVER_ID_MESA_TURNIP;
 }
 
-static bool not_turnip(const HleDriver *d)
-{
-    return !mesa_turnip(d);
-}
-
 static bool arm_proprietary(const HleDriver *d)
 {
     return d->drv.driverID == VK_DRIVER_ID_ARM_PROPRIETARY;
@@ -53,17 +48,6 @@ static bool mali(const HleDriver *d)
 static bool not_adreno(const HleDriver *d)
 {
     return !qualcomm_proprietary(d) && !mesa_turnip(d);
-}
-
-/* The present CPU wait works around Qualcomm's driver, whose present holds
- * the queue's lock for 3-6 ms while it waits; Arm's present returns at once,
- * so the wait only costs there. Measured on a Mali-G52 (Arm's r34p0, Vulkan
- * 1.1, 2026-10-30): with the wait the presenter spent 620-730 ms/s of CPU
- * waiting for its passes, without it 0.3 ms/s, the picture the same (Sega GT
- * 2002, Beyond Good & Evil). */
-static bool not_turnip_not_arm(const HleDriver *d)
-{
-    return !mesa_turnip(d) && !arm_proprietary(d);
 }
 
 /* PowerVR (vendor 0x1010) before driver 0x00582558 (ARMSX2's and PPSSPP's bound) */
@@ -88,6 +72,17 @@ static bool mali_g57(const HleDriver *d)
 static bool mali_g52_arm(const HleDriver *d)
 {
     return arm_proprietary(d) && strstr(d->props.deviceName, "Mali-G52") != NULL;
+}
+
+/* The present CPU wait works around Qualcomm's driver, whose present holds
+ * the queue's lock for 3-6 ms while it waits; the Mali-G52's (Arm's r34p0,
+ * Vulkan 1.1, 2026-10-30) returns at once, so the wait only cost there: the
+ * presenter spent 620-730 ms/s waiting for its passes, without it 0.3 ms/s,
+ * the picture the same (Sega GT 2002, Beyond Good & Evil). Arm's other GPUs
+ * and releases are untested, so they keep it. */
+static bool not_turnip_not_g52_arm(const HleDriver *d)
+{
+    return !mesa_turnip(d) && !mali_g52_arm(d);
 }
 
 /* Timestamp queries that never resolve: ARMSX2's Mali-G615, and the G52's
@@ -135,10 +130,10 @@ static const HleQuirk k_quirks[] = {
     { HLE_QUIRK_NO_TIMESTAMPS, "no_timestamps", no_timestamps_on },
     /* Qualcomm's driver: a present waiting on the pass's semaphore waited
      * 3-6 ms a refresh in the driver, the queue's lock held (Halo 2).
-     * Turnip's makes a sync file and returns (Mesa vk_android.c), and Arm's
-     * returns too (not_turnip_not_arm, measured); the other drivers are
-     * untested, so they keep the wait. */
-    { HLE_QUIRK_PRESENT_CPU_WAIT, "present_cpu_wait", not_turnip_not_arm },
+     * Turnip's makes a sync file and returns (Mesa vk_android.c), and the
+     * Mali-G52's under Arm's driver returns too (not_turnip_not_g52_arm,
+     * measured); the other drivers are untested, so they keep the wait. */
+    { HLE_QUIRK_PRESENT_CPU_WAIT, "present_cpu_wait", not_turnip_not_g52_arm },
     /* Mali-G57 MC2, Arm's r54p1 (an Infinix X6858 user's diag log,
      * 2026-10-26): Mortal Kombat Shaolin Monks' meshes exploded; its vertices
      * are 18 bytes, two floats at offset 10, and the diag build counted 7.8

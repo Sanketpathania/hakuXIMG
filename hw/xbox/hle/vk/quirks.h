@@ -74,7 +74,8 @@ enum {
      * queue held (Qualcomm's: Android's present asks the driver for a fence
      * over it): the presenter waits for its pass itself, unlocked, and
      * presents with nothing to wait for (vk/swapchain.c). On for every
-     * driver but Turnip, whose present hands the compositor a fence. */
+     * driver but Turnip, whose present hands the compositor a fence, and the
+     * Mali-G52 under Arm's driver, whose present returns at once (measured). */
     HLE_QUIRK_PRESENT_CPU_WAIT = 1u << 11,
     /* A vertex attribute whose address its component size doesn't divide
      * (Vulkan's rule: a float at a 2-byte boundary, as an Xbox vertex of 18

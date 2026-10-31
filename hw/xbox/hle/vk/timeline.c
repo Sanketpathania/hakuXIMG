@@ -232,6 +232,16 @@ static void publish(uint64_t v)
     }
 }
 
+/* A wait that failed loses the device; the log has what it waited for and
+ * where the timeline stood (the loss's message names the call alone) */
+static void wait_failed(VkResult r, const char *what, uint64_t value)
+{
+    hle_log("hakuX-hle-back", "%s failed for %llu: submitted %llu, completed %llu", what,
+            (unsigned long long)value, (unsigned long long)hle_atomic_read(&g_tl.submitted),
+            (unsigned long long)hle_atomic_read(&g_tl.completed));
+    hle_vk_lose(r, what);
+}
+
 static void *watch_thread(void *opaque)
 {
     uint64_t done = 0;
@@ -252,7 +262,7 @@ static void *watch_thread(void *opaque)
             continue;
         }
         if (r != VK_SUCCESS) {
-            hle_vk_lose(r, "vkWaitSemaphores (timeline)");
+            wait_failed(r, "vkWaitSemaphores (timeline)", want);
             return NULL;
         }
         uint64_t v = 0;
@@ -409,7 +419,7 @@ void hle_tl_wait(uint64_t value)
     while (hle_tl_completed() < value) {
         const VkResult r = hle_tl_sem_wait(g_tl.sem, value, 100 * 1000 * 1000ull);
         if (r != VK_SUCCESS && r != VK_TIMEOUT) {
-            hle_vk_lose(r, "vkWaitSemaphores");    /* completed: all (hle_tl_lose) */
+            wait_failed(r, "vkWaitSemaphores", value);  /* completed: all (hle_tl_lose) */
         }
         uint64_t v = 0;
         T.vkGetSemaphoreCounterValue(g_hvk.dev, g_tl.sem, &v);

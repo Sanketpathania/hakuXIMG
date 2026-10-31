@@ -39,31 +39,6 @@ static bool arm_proprietary(const HleDriver *d)
     return d->drv.driverID == VK_DRIVER_ID_ARM_PROPRIETARY;
 }
 
-/* Arm's driver release, from its driverInfo ("v1.r34p0-01eac0.<build>": 34);
- * 0 for another driver or info that names none */
-static unsigned arm_release(const HleDriver *d)
-{
-    const char *r = arm_proprietary(d) ? d->drv.driverInfo : NULL;
-    while (r && (r = strstr(r, ".r")) != NULL) {
-        unsigned n = 0;
-        for (r += 2; *r >= '0' && *r <= '9' && n < 1000; r++) {
-            n = n * 10 + (unsigned)(*r - '0');
-        }
-        if (n && *r == 'p') {
-            return n;
-        }
-    }
-    return 0;
-}
-
-/* Arm's driver before r40: its host wait on a timeline semaphore loses the
- * device (no_sem_wait) */
-static bool arm_before_r40(const HleDriver *d)
-{
-    const unsigned r = arm_release(d);
-    return r && r < 40;
-}
-
 /* Mali hardware, any driver (vendor 0x13B5: Arm's, PanVK) */
 static bool mali(const HleDriver *d)
 {
@@ -110,12 +85,37 @@ static bool mali_g615_blob(const HleDriver *d)
     return mali_g615(d) && !malisx2(d);
 }
 
+/* Arm's own driver's release, from its driverInfo ("v1.r34p0-01eac0.<build>":
+ * 34); 0 for another driver (malisx2 too) or info that names none */
+static unsigned arm_release(const HleDriver *d)
+{
+    const char *r = arm_blob(d) ? d->drv.driverInfo : NULL;
+    while (r && (r = strstr(r, ".r")) != NULL) {
+        unsigned n = 0;
+        for (r += 2; *r >= '0' && *r <= '9' && n < 1000; r++) {
+            n = n * 10 + (unsigned)(*r - '0');
+        }
+        if (n && *r == 'p') {
+            return n;
+        }
+    }
+    return 0;
+}
+
+/* Arm's own driver before r40: its host wait on a timeline semaphore loses
+ * the device (no_sem_wait) */
+static bool arm_before_r40(const HleDriver *d)
+{
+    const unsigned r = arm_release(d);
+    return r && r < 40;
+}
+
 /* A Mali-G52 under Arm's own driver (the r34p0 build of an Anbernic RG Vita,
- * Unisoc T618, showed the quirks below; PanVK and other drivers for the same
- * GPU are not it). */
+ * Unisoc T618, showed the quirks below; PanVK, malisx2 and other drivers for
+ * the same GPU are not it: their measurements were the blob's). */
 static bool mali_g52_arm(const HleDriver *d)
 {
-    return arm_proprietary(d) && strstr(d->props.deviceName, "Mali-G52") != NULL;
+    return arm_blob(d) && strstr(d->props.deviceName, "Mali-G52") != NULL;
 }
 
 /* The present CPU wait works around Qualcomm's driver, whose present holds

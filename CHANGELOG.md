@@ -13,11 +13,16 @@ Xbox Live through Insignia, and game fixes.
 ### Games
 - **Fable: The Lost Chapters** — the hero's face and arms are no longer black or noise
 - **Morrowind** — no longer freezes when you leave a building: disc and hard-disk reads now take a little time, as on the console. The inventory's character is drawn properly: it no longer stands on red with a black band over its head, or leaves ghost copies of itself around it when you change gear after a load
-- **Halo 2** — the fog no longer shows as stripes that move with the camera
+- **Halo 2** — the fog no longer shows as stripes that move with the camera, and with the scope up the view around it is dimmed with black lines, not light blue
 - **Munch's Oddysee** — no dark box over the ground under the characters' shadows
 - **Project Zero II (PAL)** — no longer hangs on its first frame
 - **Amped 2** — no longer crashes as its first level loads
 - **Mortal Kombat: Shaolin Monks** — the models no longer explode on Mali-G57 GPUs
+- **Burnout 2: Point of Impact** — no longer crashes as it starts
+- **Def Jam: Fight for NY** — no longer freezes on one frame at the intro cutscene: while hakuX holds a game up (such as while its shaders compile), the game's clock now waits too
+- **Double-S.T.E.A.L: The Second Clash** — no longer stops as its first scene begins, and the screen is no longer black, also after loading a savestate
+- **Soldier of Fortune II: Double Helix** — no longer crashes when you skip an intro movie
+- **Touge R** — races are no longer black under the HUD
 
 ### Performance
 - **Network** — with the network on (system link or XLink Kai), the console no longer keeps most of a CPU core busy

@@ -2408,10 +2408,11 @@ static unsigned g_rt_told;
  * A linear surface's texel coordinates are divided by the surface's own
  * scale, so the bit that has the shaders divide (8 + st) is set for a
  * surface at the resolution scale only: a small target renders at 1x
- * (surf_scale), and divided by the device's scale its texels were read
- * from the wrong place (at 2x, a quarter of it; Sega GT 2002's car skins,
- * twelve 64 x 64 targets a frame, lost their texture the same way at a
- * 0.5x scale, read from their top-left corner). */
+ * (surf_scale), and divided by the device's scale its texel coordinates
+ * were multiplied by it: at 2x the whole target came in a quarter of the
+ * area it was drawn over, the rest read past its edges as the stage
+ * addresses them (reported for Sega GT 2002's car skins, twelve 64 x 64
+ * targets a frame, read by texel). */
 static uint32_t stage_slot(const HleCmdDraw *c, unsigned st, uint32_t rt_id, uint32_t *flags)
 {
     HleVkTex *tx = tex_find(c->tex[st]);

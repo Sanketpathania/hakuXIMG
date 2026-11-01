@@ -1600,7 +1600,11 @@ static bool present_flipped(void)
             }
         }
         if (take == head) {
-            return false;
+            if (tail != head) {
+                take = head - 1;
+            } else {
+                return false;
+            }
         }
         id = g_pd.pend[take % n];
     } while (!__atomic_compare_exchange_n(&g_pd.pend_tail, &tail, take + 1, false, __ATOMIC_ACQ_REL,

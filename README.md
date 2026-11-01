@@ -1,6 +1,9 @@
-# hakuX
+# hakuX (HakuxPVR)
 
-hakuX runs original Xbox games on Android (arm64), tuned for Adreno GPUs.
+> [!NOTE]
+> **Experimental PowerVR GPU Support**: This fork adds experimental support for Imagination PowerVR GPUs (including the Google Pixel 10 Pro XL / Google Tensor G5 `laguna`), custom Tile-Based Deferred Rendering (TBDR) Vulkan pipeline quirks, and generic Direct3D push-buffer fence deadlock fixes.
+
+hakuX runs original Xbox games on Android (arm64), with support for Adreno and experimental PowerVR GPUs.
 
 Its core runs the game's x86 code on a JIT (a FEX fork) under a
 reimplementation of the Xbox kernel, and draws by decoding the push buffer
@@ -19,8 +22,9 @@ get hakuX here for free.
 
 ## Requirements
 
-- An arm64 Android device with Vulkan. Custom Turnip drivers can be loaded
-  for Adreno GPUs.
+- An arm64 Android device with Vulkan:
+  - Adreno GPUs (with custom Turnip driver support)
+  - **Imagination PowerVR GPUs** (including Google Pixel 10 Pro XL)
 - Your own game images (ISO or XISO), dumped from discs you own.
 
 No BIOS, MCPX ROM or hard disk image is needed. hakuX doesn't include any

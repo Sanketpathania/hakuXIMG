@@ -266,10 +266,12 @@ static uint32_t pmc_intr(void)
 {
     uint32_t v = 0;
     if (ld(NV_PCRTC_INTR_0) & ld(NV_PCRTC_INTR_EN_0)) {
-        v |= PMC_INTR_PCRTC;
+        v |= PMC_INTR_PCRTC | PMC_INTR_PTIMER;
     }
-    if (g_pbmode && (ld(NV_PGRAPH_INTR) & ld(NV_PGRAPH_INTR_EN))) {
-        v |= PMC_INTR_PGRAPH;                       /* push-buffer mode: a software trap */
+    if (g_pbmode && ld(NV_PGRAPH_INTR)) {
+        if (!ld(NV_PGRAPH_INTR_EN) || (ld(NV_PGRAPH_INTR) & ld(NV_PGRAPH_INTR_EN))) {
+            v |= PMC_INTR_PGRAPH;                       /* push-buffer mode: a software trap */
+        }
     }
     if (ld(NV_PTIMER_INTR_0) & ld(NV_PTIMER_INTR_EN_0) & PTIMER_ALARM) {
         v |= PMC_INTR_PTIMER;
@@ -395,13 +397,27 @@ static uint64_t nv2a_read_reg(uint32_t off, unsigned size)
         case NV_PFIFO_CACHE1_DMA_PUSH:
             v = fifo_empty() ? ld(word) & ~PFIFO_DMA_BUSY : ld(word) | PFIFO_DMA_BUSY;
             break;
+        case NV_PFIFO_CACHE1_DMA_PUT:
+            v = ld(word);
+            break;
+        case NV_PFIFO_CACHE1_DMA_GET:
+            v = g_pbmode ? hle_pb_live_get() : ld(word);
+            break;
+        case NV_PFIFO_CACHE1_REF:
+            v = ld(word);
+            break;
         case NV_USER_DMA_PUT:
-        case NV_USER_DMA_GET:
         case NV_USER_REF:
             if (!g_pbmode) {
                 goto plain;
             }
             v = ld(word - NV_USER_DMA_PUT + NV_PFIFO_CACHE1_DMA_PUT);
+            break;
+        case NV_USER_DMA_GET:
+            if (!g_pbmode) {
+                goto plain;
+            }
+            v = hle_pb_live_get();
             break;
         case NV_PFB_WBC:
             v = 0; /* no write-combine flush pending (Riddick spins on it) */
@@ -413,6 +429,12 @@ static uint64_t nv2a_read_reg(uint32_t off, unsigned size)
     }
 plain:
     switch (off) {
+    case NV_PFIFO_CACHE1_DMA_GET:
+    case NV_USER_DMA_GET:
+        return g_pbmode ? hle_pb_live_get() : ld(NV_PFIFO_CACHE1_DMA_GET);
+    case NV_PFIFO_CACHE1_REF:
+    case NV_USER_REF:
+        return ld(NV_PFIFO_CACHE1_REF);
     case NV_PMC_INTR_0:
         return pmc_intr();
     case NV_PTIMER_TIME_0:
@@ -473,7 +495,12 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         hle_pb_subroutine_written((uint32_t)value);     /* D3D left a run (4928) */
         return;
     }
-    if (g_pbmode && size == 4 && (off == NV_PFIFO_CACHE1_DMA_PUT || off == NV_PFIFO_CACHE1_DMA_GET)) {
+    if (g_pbmode && size == 4 && (off == NV_PFIFO_CACHE1_DMA_PUT || off == NV_PFIFO_CACHE1_DMA_GET ||
+                                  off == NV_PFIFO_CACHE1_REF)) {
+        if (off == NV_PFIFO_CACHE1_REF) {
+            __atomic_store_n(reg(off), (uint32_t)value, __ATOMIC_RELEASE);
+            return;
+        }
         static unsigned s_logged_c;             /* debug: the first direct CACHE1 writes */
         if (s_logged_c++ < 16) {
             nc_log("hakuX-native", "nv2a: CACHE1 %s <- %08x (GET %08x PUT %08x)",
@@ -775,6 +802,7 @@ void nc_dev_nv2a_init(void)
     g_regs = calloc(1, NV2A_SIZE); /* pages are touched only where the guest writes */
     nc_wr32(g_regs + NV_PMC_BOOT_0, 0x02A000A1u);
     nc_wr32(g_regs + NV_PFB_CSTATUS, 64u << 20);
+    nc_wr32(g_regs + NV_PGRAPH_INTR_EN, ~0u);
     char v[PROP_VALUE_MAX] = "";
     hle_prop_get("debug.hakux.nvcensus", v);
     const char *e = getenv("NC_NV2A_CENSUS");

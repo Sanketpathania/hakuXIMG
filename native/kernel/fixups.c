@@ -34,6 +34,35 @@ static const uint8_t k_mailbox_wait[] = {0x05, 0x00, 0x08, 0x00, 0x00,  /* add e
                                          0x75, 0xFA};                   /* jne the cmp */
 #define LOOP_OFF 5 /* the cmp */
 
+/* D3D8 CDevice::Init push-buffer idle checks after KickOff:
+ *   test reg, 0x0FFFFFFF       ; F7 C0..C7 FF FF FF 0F (all GPRs across XDK titles)
+ * Following instructions:
+ *   pop reg(s)                 ; 58..5F (any number of pops)
+ *   je  +offset                ; 74 ?? -> patched to EB ?? (jmp short)
+ *   jz  +offset                ; 0F 84 ?? ?? ?? ?? -> patched to 90 E9 ?? ?? ?? ?? (nop, jmp near)
+ *   jne -offset                ; 75 ?? (negative backward jump) -> patched to 90 90 (nop nop)
+ */
+static const uint8_t k_d3d_pb_wait_modrm[] = {
+    0xC0, /* eax */
+    0xC1, /* ecx */
+    0xC2, /* edx */
+    0xC3, /* ebx */
+    0xC5, /* ebp */
+    0xC6, /* esi */
+    0xC7  /* edi */
+};
+
+/* D3D::BlockOnTime push-buffer fence wait:
+ *   cmp eax, 0x2000            ; 3D 00 20 00 00
+ *   cmp reg, 0x2000            ; 81 F8..FF 00 20 00 00
+ * Following instruction:
+ *   jae +offset                ; 73 ?? -> patched to 90 90 (nop nop)
+ *   jae +offset                ; 0F 83 ?? ?? ?? ?? -> patched to 6x nop
+ */
+static const uint8_t k_d3d_block_on_time_prefix[] = {
+    0x3D, 0x00, 0x20, 0x00, 0x00
+};
+
 static bool apu_spin_on(void)
 {
     char v[PROP_VALUE_MAX] = "";
@@ -84,36 +113,96 @@ void nc_kernel_title_fixups(NcKernel *k, const HleXbeInfo *xbe)
             nc_kernel_section_fixups(k, s->va, s->vsize, s->name);
         }
     }
-    if (!apu_spin_on()) {
+    const bool patch_apu = apu_spin_on();
+    if (!patch_apu) {
         nc_log("hakuX-native", "fixups: DirectSound mailbox waits left spinning (debug.hakux.apuspin=0)");
-        return;
     }
     unsigned patched = 0;
     for (unsigned i = 0; i < xbe->nsections; i++) {
         const HleXbeSection *s = &xbe->sections[i];
-        if (!s->vsize || !section_mapped(k->vm, s->va, s->vsize)) {
+        const uint32_t scan_len = s->raw_size ? s->raw_size : s->vsize;
+        if (!scan_len || !section_mapped(k->vm, s->va, scan_len)) {
             continue; /* not loaded at boot */
         }
         const uint8_t *base = nc_vm_host(k->vm, s->va);
-        const uint8_t *p = base, *end = base + s->vsize;
-        while ((p = memmem(p, (size_t)(end - p), k_mailbox_wait, sizeof(k_mailbox_wait))) != NULL) {
-            const uint32_t va = s->va + (uint32_t)(p - base) + LOOP_OFF;
-            const uint32_t stub = mailbox_stub(k, va);
-            if (stub) {
-                uint8_t *site = nc_vm_host(k->vm, va);
-                const uint32_t rel = stub - (va + 5);
-                site[0] = 0xE9;
-                memcpy(site + 1, &rel, 4);
-                site[5] = 0x90;
-                patched++;
-                nc_log("hakuX-native", "fixups: DirectSound mailbox wait at %08x (%s) waits on the APU (stub %08x)",
-                       va, s->name, stub);
+        const uint8_t *end = base + scan_len;
+
+        if (patch_apu) {
+            const uint8_t *p = base;
+            while ((p = memmem(p, (size_t)(end - p), k_mailbox_wait, sizeof(k_mailbox_wait))) != NULL) {
+                const uint32_t va = s->va + (uint32_t)(p - base) + LOOP_OFF;
+                const uint32_t stub = mailbox_stub(k, va);
+                if (stub) {
+                    uint8_t *site = nc_vm_host(k->vm, va);
+                    const uint32_t rel = stub - (va + 5);
+                    site[0] = 0xE9;
+                    memcpy(site + 1, &rel, 4);
+                    site[5] = 0x90;
+                    patched++;
+                    nc_log("hakuX-native", "fixups: DirectSound mailbox wait at %08x (%s) waits on the APU (stub %08x)",
+                           va, s->name, stub);
+                }
+                p += sizeof(k_mailbox_wait);
             }
-            p += sizeof(k_mailbox_wait);
+        }
+
+        /* Generic D3D push-buffer idle checks: test reg, 0x0FFFFFFF */
+        for (unsigned n = 0; n < sizeof(k_d3d_pb_wait_modrm); n++) {
+            const uint8_t needle[6] = {0xF7, k_d3d_pb_wait_modrm[n], 0xFF, 0xFF, 0xFF, 0x0F};
+            const uint8_t *dp = base;
+            while ((dp = memmem(dp, (size_t)(end - dp), needle, sizeof(needle))) != NULL) {
+                uint32_t off = 6;
+                while (dp + off < end && dp[off] >= 0x58 && dp[off] <= 0x5F) {
+                    off++; /* preserve any number of pop reg instructions */
+                }
+                if (dp + off < end && dp[off] == 0x74) {
+                    const uint32_t va = s->va + (uint32_t)(dp - base) + off;
+                    uint8_t *site = nc_vm_host(k->vm, va);
+                    site[0] = 0xEB; /* je -> jmp */
+                    patched++;
+                    nc_log("hakuX-native", "fixups: D3D CDevice::Init push-buffer wait bypassed at %08x (%s)", va, s->name);
+                } else if (dp + off + 5 < end && dp[off] == 0x0F && dp[off + 1] == 0x84) {
+                    const uint32_t va = s->va + (uint32_t)(dp - base) + off;
+                    uint8_t *site = nc_vm_host(k->vm, va);
+                    site[0] = 0x90; /* nop */
+                    site[1] = 0xE9; /* jmp rel32 (displacement preserved) */
+                    patched++;
+                    nc_log("hakuX-native", "fixups: D3D CDevice::Init push-buffer wait (near jz) bypassed at %08x (%s)", va, s->name);
+                } else if (dp + off + 1 < end && dp[off] == 0x75 && (int8_t)dp[off + 1] < 0) {
+                    const uint32_t va = s->va + (uint32_t)(dp - base) + off;
+                    uint8_t *site = nc_vm_host(k->vm, va);
+                    site[0] = 0x90; /* jne backward loop -> nop nop */
+                    site[1] = 0x90;
+                    patched++;
+                    nc_log("hakuX-native", "fixups: D3D push-buffer spin-wait (jne) bypassed at %08x (%s)", va, s->name);
+                }
+                dp += 6;
+            }
+        }
+
+        /* D3D::BlockOnTime push-buffer fence wait */
+        const uint8_t *bp = base;
+        while ((bp = memmem(bp, (size_t)(end - bp), k_d3d_block_on_time_prefix, sizeof(k_d3d_block_on_time_prefix))) != NULL) {
+            uint32_t off = 5;
+            if (bp + off < end && bp[off] == 0x73) {
+                const uint32_t va = s->va + (uint32_t)(bp - base) + off;
+                uint8_t *site = nc_vm_host(k->vm, va);
+                site[0] = 0x90; /* jae -> nop nop */
+                site[1] = 0x90;
+                patched++;
+                nc_log("hakuX-native", "fixups: D3D BlockOnTime push-buffer wait bypassed at %08x (%s)", va, s->name);
+            } else if (bp + off + 5 < end && bp[off] == 0x0F && bp[off + 1] == 0x83) {
+                const uint32_t va = s->va + (uint32_t)(bp - base) + off;
+                uint8_t *site = nc_vm_host(k->vm, va);
+                memset(site, 0x90, 6); /* jae near -> 6x nop */
+                patched++;
+                nc_log("hakuX-native", "fixups: D3D BlockOnTime push-buffer wait (near jae) bypassed at %08x (%s)", va, s->name);
+            }
+            bp += sizeof(k_d3d_block_on_time_prefix);
         }
     }
     if (!patched) {
-        nc_log("hakuX-native", "fixups: no DirectSound mailbox wait found");
+        nc_log("hakuX-native", "fixups: no DirectSound mailbox wait or D3D push-buffer wait found");
     }
 }
 

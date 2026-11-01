@@ -32,12 +32,14 @@ profile-out-*/
 # a manual drop-in (android/app/src/debug/jniLibs/arm64-v8a/README.md).
 /android/app/src/debug/jniLibs/arm64-v8a/libVkLayer_GLES_RenderDoc.so
 # The native core's app libraries: build outputs (tools/native/app-libs.sh).
-/android/app/src/main/jniLibs/arm64-v8a/libhakuxcore.so
-/android/app/src/main/jniLibs/arm64-v8a/libSDL3.so
-/android/app/src/main/jniLibs/arm64-v8a/libmain_hook.so
-/android/app/src/main/jniLibs/arm64-v8a/libfile_redirect_hook.so
-/android/app/src/main/jniLibs/arm64-v8a/libgsl_alloc_hook.so
-/android/app/src/main/jniLibs/arm64-v8a/libhook_impl.so
+# Allow prebuilt libraries for GitHub Actions / CI builds:
+!/android/app/src/main/jniLibs/
+!/android/app/src/main/jniLibs/arm64-v8a/
+!/android/app/src/main/jniLibs/arm64-v8a/*.so
+
+*.apk
+check_*.py
+get_prefs.py
 
 # local agent instructions (not versioned)
 /CLAUDE.md

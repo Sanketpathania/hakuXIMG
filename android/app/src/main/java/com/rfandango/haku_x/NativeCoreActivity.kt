@@ -25,6 +25,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.RelativeLayout
 import android.widget.TextView
@@ -302,6 +303,11 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+      setShowWhenLocked(true)
+      setTurnScreenOn(true)
+    }
+    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     /* the in-game menus (framework dialogs) light or dark, as the app's theme is */
     if (AppTheme.isDark(this)) {
       setTheme(R.style.Theme_HakuX_Game_Dark)

@@ -2188,7 +2188,7 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
         VkGraphicsPipelineCreateInfo gci = {
             .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &ri,
             .stageCount = 2, .pStages = st, .pInputAssemblyState = &ia,
-            .pVertexInputState = g_hvk.caps.vids ? NULL : &vis,
+            .pVertexInputState = &vis,
             .pViewportState = &vp, .pRasterizationState = &rs, .pMultisampleState = &ms,
             .pDepthStencilState = &ds, .pColorBlendState = &cb, .pDynamicState = &dy,
             .layout = g_dr.layout };

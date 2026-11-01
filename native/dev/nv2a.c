@@ -306,6 +306,9 @@ static uint64_t nv2a_read_reg(uint32_t off, unsigned size)
         case NV_PFIFO_CACHE1_DMA_GET:
             v = g_pbmode ? hle_pb_live_get() : ld(word);
             break;
+        case NV_PFIFO_CACHE1_REF:
+            v = ld(word);
+            break;
         case NV_USER_DMA_PUT:
         case NV_USER_REF:
             if (!g_pbmode) {
@@ -332,6 +335,9 @@ plain:
     case NV_PFIFO_CACHE1_DMA_GET:
     case NV_USER_DMA_GET:
         return g_pbmode ? hle_pb_live_get() : ld(NV_PFIFO_CACHE1_DMA_GET);
+    case NV_PFIFO_CACHE1_REF:
+    case NV_USER_REF:
+        return ld(NV_PFIFO_CACHE1_REF);
     case NV_PMC_INTR_0:
         return pmc_intr();
     case NV_PTIMER_TIME_0:
@@ -392,7 +398,12 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         hle_pb_subroutine_written((uint32_t)value);     /* D3D left a run (4928) */
         return;
     }
-    if (g_pbmode && size == 4 && (off == NV_PFIFO_CACHE1_DMA_PUT || off == NV_PFIFO_CACHE1_DMA_GET)) {
+    if (g_pbmode && size == 4 && (off == NV_PFIFO_CACHE1_DMA_PUT || off == NV_PFIFO_CACHE1_DMA_GET ||
+                                  off == NV_PFIFO_CACHE1_REF)) {
+        if (off == NV_PFIFO_CACHE1_REF) {
+            __atomic_store_n(reg(off), (uint32_t)value, __ATOMIC_RELEASE);
+            return;
+        }
         static unsigned s_logged_c;             /* debug: the first direct CACHE1 writes */
         if (s_logged_c++ < 16) {
             nc_log("hakuX-native", "nv2a: CACHE1 %s <- %08x (GET %08x PUT %08x)",

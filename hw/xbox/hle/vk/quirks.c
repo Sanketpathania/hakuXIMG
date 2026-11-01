@@ -61,6 +61,16 @@ static bool powervr(const HleDriver *d)
     return d->props.vendorID == 0x1010 || d->drv.driverID == VK_DRIVER_ID_IMAGINATION_PROPRIETARY;
 }
 
+static bool powervr_or_qualcomm_proprietary(const HleDriver *d)
+{
+    return powervr(d) || qualcomm_proprietary(d);
+}
+
+static bool powervr_or_turnip(const HleDriver *d)
+{
+    return powervr(d) || mesa_turnip(d);
+}
+
 static bool powervr_or_arm_proprietary(const HleDriver *d)
 {
     return powervr(d) || arm_proprietary(d);
@@ -84,10 +94,11 @@ static bool mali_g615(const HleDriver *d)
 
 /* Seen on (driver, version, what showed it). */
 static const HleQuirk k_quirks[] = {
-    /* Adreno 840 stock driver 0x8034a02c: Forza's menu text picks its glyph
-     * layer with a per-vertex mask (v4); after a pipeline change the draw
-     * read v4 from offset 144 of the vertex instead of 64 (wrong letters). */
-    { HLE_QUIRK_VI_AFTER_PIPELINE, "vi_after_pipeline", qualcomm_proprietary },
+    /* Adreno 840 stock driver 0x8034a02c & PowerVR TBDR: Forza's menu text
+     * picks its glyph layer with a per-vertex mask (v4); after a pipeline
+     * change the draw read v4 from offset 144 of the vertex instead of 64
+     * (wrong letters). PowerVR also drops dynamic vertex input across pipes. */
+    { HLE_QUIRK_VI_AFTER_PIPELINE, "vi_after_pipeline", powervr_or_qualcomm_proprietary },
     { HLE_QUIRK_STATE_AFTER_PIPELINE, "state_after_pipeline", NULL },
     /* Turnip: Halo's floors flashed unlit in single frames, its lighting
      * passes over the base pass split by a mid-frame kick; the stock Adreno
@@ -98,11 +109,11 @@ static const HleQuirk k_quirks[] = {
      * backdrop with the depth test off, then the model. TU_DEBUG=nolrzfc
      * (LRZ cleared by a blit) drew them right (2026-10-22). */
     { HLE_QUIRK_LRZ_CLEAR, "lrz_clear", mesa_turnip },
-    /* Turnip (tu_pipeline.cc: no colour attachments, a static dummy blend
+    /* Turnip & PowerVR TBDR (tu_pipeline.cc: no colour attachments, a static dummy blend
      * group): Fatal Frame's afterimage (CONSTANT_ALPHA over the last frame)
      * dropped out on the frames whose post pass shared a command buffer with
      * its depth-only shadow pass, and the scene flickered (2026-10-23). */
-    { HLE_QUIRK_BLEND_CONST_RESET, "blend_const_reset", mesa_turnip },
+    { HLE_QUIRK_BLEND_CONST_RESET, "blend_const_reset", powervr_or_turnip },
     /* ARMSX2 (GSDeviceVK.cpp): "Arm's Mali blob crashes in
      * vkCmdPushDescriptorSetKHR even where it advertises the extension" */
     { HLE_QUIRK_NO_PUSH_DESC, "no_push_desc", powervr_or_arm_proprietary },

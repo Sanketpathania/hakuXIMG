@@ -26,6 +26,7 @@
 #define NV_PFIFO_CACHE1_DMA_INSTANCE 0x00322Cu  /* bits 15:0: the push buffer's DMA object >> 4 */
 #define NV_PFIFO_CACHE1_DMA_PUT      0x003240u
 #define NV_PFIFO_CACHE1_DMA_GET      0x003244u
+#define NV_PFIFO_CACHE1_REF          0x003248u
 #define NV_PFIFO_CACHE1_DMA_SUBROUTINE 0x00324Cu /* the return offset | 1 inside a call */
 #define NV_PGRAPH_INTR               0x400100u  /* pending; the ISR writes 1s to clear */
 #define NV_PGRAPH_NSOURCE            0x400108u
@@ -774,6 +775,11 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
             s_seen[cls >> 5] |= 1u << (cls & 31);
             hle_log("hakuX-hle-pb", "subchannel %u: object %08x, class %02x", subch, v, cls);
         }
+        return HLE_PB_GO;
+    }
+    if (m == 0x50) {                                /* SET_REFERENCE (NV_FIFO_CACHE1_REF) */
+        hle_host_gpu_reg_set(NV_PFIFO_CACHE1_REF, v);
+        publish_get();
         return HLE_PB_GO;
     }
     if (g_pb.obj_class[subch] == 0x97) {

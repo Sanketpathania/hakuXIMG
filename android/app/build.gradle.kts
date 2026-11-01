@@ -57,7 +57,7 @@ android {
   buildTypes {
     debug {
       applicationIdSuffix = ".debug"
-      resValue("string", "app_name", "HakuxPVR")
+      resValue("string", "app_name", "hakuXPVR")
       ndk {
         debugSymbolLevel = "NONE"
       }
@@ -74,7 +74,7 @@ android {
       )
     }
     release {
-      resValue("string", "app_name", "HakuxPVR")
+      resValue("string", "app_name", "hakuXPVR")
       isMinifyEnabled = true
       proguardFiles(
         getDefaultProguardFile("proguard-android-optimize.txt"),
